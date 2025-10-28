@@ -2,78 +2,41 @@ import os
 import logging
 import random
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, ConversationHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Токен из переменных окружения Render
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 
-# Состояния для ConversationHandler
-MAIN_MENU, PRODUCT_MENU, DEMO_SCENARIOS = range(3)
-
-# Улучшенные демо-сценарии для продуктов
+# Улучшенные демо-сценарии
 DEMO_SCENARIOS = {
     'гримуар': {
-        'архетипы': {
-            'question': '🔮 Какие архетипы проявляются в вашей жизни сейчас?',
-            'demo_answer': 'В платной версии вы получите:\n• Анализ доминирующих архетипов\n• Рекомендации по работе с ними\n• Персональные метафоры для роста\n\n💫 Пример: Если проявляется "Воин" - фокус на действиях, если "Мудрец" - на анализе.',
-            'teaser': 'Узнайте какие 5 архетипов управляют вашими решениями!'
-        },
-        'метафоры': {
-            'question': '🌌 Какую метафору выбрать для вашего жизненного этапа?',
-            'demo_answer': 'Полная версия предложит:\n• Метафору текущего этапа жизни\n• Символы для трансформации\n• Практики для интеграции\n\n🎭 Пример: "Ваша жизнь как сад" или "Путешествие героя".',
-            'teaser': 'Откройте метафору, которая изменит ваше восприятие!'
-        },
-        'самопознание': {
-            'question': '🧠 Как углубить самопознание через символы?',
-            'demo_answer': 'В платном доступе:\n• Диагностика через символы\n• Персональные практики\n• Ежедневные инсайты\n\n📖 Пример: Работа с образами воды, огня, земли и воздуха.',
-            'teaser': 'Превратите самопознание в увлекательное путешествие!'
-        }
+        'архетипы': '🔮 В платной версии: анализ ваших архетипов, рекомендации по работе с ними, персональные метафоры для роста.',
+        'метафоры': '🌌 Полная версия: метафора вашего жизненного этапа, символы для трансформации, практики для интеграции.',
+        'самопознание': '🧠 Платный доступ: диагностика через символы, персональные практики, ежедневные инсайты.'
     },
     'переговорщик': {
-        'конфликт': {
-            'question': '⚡ Как вести себя в конфликтной ситуации?',
-            'demo_answer': 'Платная версия даст:\n• Стратегию деэскалации\n• Техники активного слушания\n• Сценарии для разных типов конфликтов\n\n🛡️ Пример: Метод "Я-высказываний" и техника "Зеркало".',
-            'teaser': 'Научитесь превращать конфликты в возможности!'
-        },
-        'подготовка': {
-            'question': '📋 Как подготовиться к сложным переговорам?',
-            'demo_answer': 'Полный доступ включает:\n• Чек-лист подготовки\n• Анализ позиций сторон\n• Прогнозирование возражений\n\n🎯 Пример: Метод BATNA - лучшая альтернатива переговорному соглашению.',
-            'teaser': 'Подготовьтесь так, чтобы переговоры шли по вашему сценарию!'
-        },
-        'возражения': {
-            'question': '🛡️ Как работать с возражениями?',
-            'demo_answer': 'В платной версии:\n• Типология возражений\n• Алгоритмы ответов\n• Тренировка реакций\n\n💡 Пример: Техника "Согласие и развитие" вместо спора.',
-            'teaser': 'Научитесь видеть в возражениях скрытые потребности!'
-        }
+        'конфликт': '⚡ В платной версии: стратегия деэскалации, техники активного слушания, сценарии для конфликтов.',
+        'подготовка': '📋 Полный доступ: чек-лист подготовки, анализ позиций сторон, прогнозирование возражений.',
+        'возражения': '🛡️ Платная версия: типология возражений, алгоритмы ответов, тренировка реакций.'
     }
 }
 
-# Случайные тизеры для кнопки "Попробовать"
-DEMO_TEASERS = {
-    'гримуар': [
-        "🔮 Узнайте какие архетипы управляют вашей жизнью",
-        "🌌 Откройте метафору для вашего жизненного этапа", 
-        "🧠 Начните глубинное самопознание через символы",
-        "📖 Превратите самопознание в увлекательное путешествие"
-    ],
-    'переговорщик': [
-        "⚡ Научитесь управлять конфликтными ситуациями",
-        "📋 Подготовьтесь к переговорам как профессионал",
-        "🛡️ Освойте работу с возражениями",
-        "💡 Превращайте возражения в возможности"
-    ]
-}
+class BotState:
+    def __init__(self):
+        self.user_states = {}
 
-async def start(update: Update, context: CallbackContext) -> int:
-    """Начало работы с ботом - показывает главное меню"""
+bot_state = BotState()
+
+async def start(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
-    logger.info(f"Пользователь {user.first_name} начал работу с ботом")
+    logger.info(f"Пользователь {user.first_name} начал работу")
     
-    # Создаем клавиатуру главного меню
+    # Сброс состояния пользователя
+    bot_state.user_states[user.id] = 'MAIN_MENU'
+    
     keyboard = [
         [KeyboardButton("🔮 Гримуар")],
         [KeyboardButton("💼 Переговорщик")],
@@ -82,51 +45,52 @@ async def start(update: Update, context: CallbackContext) -> int:
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
-        "🎭 Добро welcome в бот саморазвития!\n\n"
-        "Выберите продукт для знакомства:",
+        "🎭 Добро пожаловать в бот саморазвития!\n\nВыберите продукт:",
         reply_markup=reply_markup
     )
-    
-    return MAIN_MENU
 
-async def handle_main_menu(update: Update, context: CallbackContext) -> int:
-    """Обработка выбора в главном меню"""
-    text = update.message.text
+async def handle_message(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
+    text = update.message.text
+    current_state = bot_state.user_states.get(user.id, 'MAIN_MENU')
+    
+    logger.info(f"Пользователь {user.first_name}: {text} (состояние: {current_state})")
+    
+    if current_state == 'MAIN_MENU':
+        await handle_main_menu(update, context)
+    elif current_state == 'PRODUCT_MENU':
+        await handle_product_menu(update, context)
+    elif current_state == 'DEMO_MENU':
+        await handle_demo_menu(update, context)
+
+async def handle_main_menu(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
+    text = update.message.text
     
     if text == "🔮 Гримуар":
-        logger.info(f"Пользователь {user.first_name} выбрал Гримуар")
-        return await show_product_menu(update, context, 'гримуар')
-    
+        bot_state.user_states[user.id] = 'PRODUCT_MENU'
+        context.user_data['current_product'] = 'гримуар'
+        await show_product_menu(update, context, 'гримуар')
+        
     elif text == "💼 Переговорщик":
-        logger.info(f"Пользователь {user.first_name} выбрал Переговорщик")
-        return await show_product_menu(update, context, 'переговорщик')
-    
+        bot_state.user_states[user.id] = 'PRODUCT_MENU'
+        context.user_data['current_product'] = 'переговорщик'
+        await show_product_menu(update, context, 'переговорщик')
+        
     elif text == "ℹ️ О боте":
         await update.message.reply_text(
-            "🤖 Этот бот помогает в самопознании и развитии навыков.\n\n"
-            "🔮 Гримуар - инструмент для самопознания через метафоры и архетипы\n"
-            "💼 Переговорщик - помощник в сложных диалогах и переговорах\n\n"
-            "Каждый продукт имеет интерактивное демо и платный доступ к AI-помощнику."
+            "🤖 Бот для самопознания и развития навыков.\n\n"
+            "🔮 Гримуар - метафоры и архетипы\n"
+            "💼 Переговорщик - сложные диалоги\n\n"
+            "Демо-версия + платный доступ к AI."
         )
-        return MAIN_MENU
-    
     else:
-        await update.message.reply_text("Пожалуйста, выберите вариант из меню:")
-        return MAIN_MENU
+        await update.message.reply_text("Выберите вариант из меню:")
 
-async def show_product_menu(update: Update, context: CallbackContext, product: str) -> int:
-    """Показывает меню конкретного продукта"""
-    context.user_data['current_product'] = product
-    
+async def show_product_menu(update: Update, context: CallbackContext, product: str) -> None:
     product_names = {
         'гримуар': '🔮 Гримуар',
         'переговорщик': '💼 Переговорщик'
-    }
-    
-    product_descriptions = {
-        'гримуар': 'Инструмент для самопознания через метафоры и архетипы',
-        'переговорщик': 'Помощник в подготовке и ведении сложных переговоров'
     }
     
     keyboard = [
@@ -137,149 +101,112 @@ async def show_product_menu(update: Update, context: CallbackContext, product: s
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
-        f"{product_names[product]}\n\n"
-        f"{product_descriptions[product]}\n\n"
-        "Выберите вариант:",
+        f"{product_names[product]}\n\nВыберите вариант:",
         reply_markup=reply_markup
     )
-    
-    return PRODUCT_MENU
 
-async def handle_product_menu(update: Update, context: CallbackContext) -> int:
-    """Обработка выбора в меню продукта"""
+async def handle_product_menu(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
     text = update.message.text
     product = context.user_data.get('current_product', 'unknown')
-    user = update.message.from_user
     
     if text == "🆓 Попробовать":
-        logger.info(f"Пользователь {user.first_name} пробует демо {product}")
-        return await show_demo_scenarios(update, context, product)
-    
+        bot_state.user_states[user.id] = 'DEMO_MENU'
+        await show_demo_scenarios(update, context, product)
+        
     elif text == "💳 Платный доступ":
-        logger.info(f"Пользователь {user.first_name} запросил платный доступ к {product}")
         await update.message.reply_text(
             "🚀 Платный доступ откроет:\n\n"
-            "• Живое общение с AI-помощником\n"
-            "• Персонализированные ответы на ваши вопросы\n" 
-            "• Полный функционал продукта\n"
+            "• Живое общение с AI\n"
+            "• Персонализированные ответы\n" 
+            "• Полный функционал\n"
             "• Доступ на 5 дней\n\n"
-            "Скоро здесь будет возможность приобрести доступ!"
+            "Скоро здесь можно будет приобрести доступ!"
         )
-        return PRODUCT_MENU
-    
+        
     elif text == "🔙 Назад":
-        return await start(update, context)
-    
+        bot_state.user_states[user.id] = 'MAIN_MENU'
+        await start(update, context)
     else:
-        await update.message.reply_text("Пожалуйста, выберите вариант из меню:")
-        return PRODUCT_MENU
+        await update.message.reply_text("Выберите вариант из меню:")
 
-async def show_demo_scenarios(update: Update, context: CallbackContext, product: str) -> int:
-    """Показывает сценарии для демо-версии"""
-    # Выбираем случайный тизер
-    teaser = random.choice(DEMO_TEASERS[product])
-    
-    # Создаем клавиатуру сценариев
+async def show_demo_scenarios(update: Update, context: CallbackContext, product: str) -> None:
     scenarios = DEMO_SCENARIOS[product]
+    
     keyboard = []
-    for scenario_key in scenarios.keys():
-        keyboard.append([KeyboardButton(scenarios[scenario_key]['question'])])
-    keyboard.append([KeyboardButton("🔙 Назад")])
+    if product == 'гримуар':
+        keyboard = [
+            [KeyboardButton("🔮 Архетипы")],
+            [KeyboardButton("🌌 Метафоры")],
+            [KeyboardButton("🧠 Самопознание")],
+            [KeyboardButton("🔙 Назад")]
+        ]
+    else:
+        keyboard = [
+            [KeyboardButton("⚡ Конфликт")],
+            [KeyboardButton("📋 Подготовка")],
+            [KeyboardButton("🛡️ Возражения")],
+            [KeyboardButton("🔙 Назад")]
+        ]
     
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
-        f"{teaser}\n\n"
-        "Выберите интересующий вас аспект:",
+        "Выберите интересующий аспект:",
         reply_markup=reply_markup
     )
-    
-    return DEMO_SCENARIOS
 
-async def handle_demo_scenarios(update: Update, context: CallbackContext) -> int:
-    """Обработка выбора демо-сценария"""
+async def handle_demo_menu(update: Update, context: CallbackContext) -> None:
+    user = update.message.from_user
     text = update.message.text
     product = context.user_data.get('current_product', 'unknown')
-    user = update.message.from_user
     
     if text == "🔙 Назад":
-        return await show_product_menu(update, context, product)
+        bot_state.user_states[user.id] = 'PRODUCT_MENU'
+        await show_product_menu(update, context, product)
+        return
     
-    # Ищем выбранный сценарий
-    scenarios = DEMO_SCENARIOS[product]
-    for scenario_key, scenario_data in scenarios.items():
-        if scenario_data['question'] == text:
-            logger.info(f"Пользователь {user.first_name} выбрал сценарий {scenario_key} для {product}")
-            
-            await update.message.reply_text(
-                f"{scenario_data['demo_answer']}\n\n"
-                f"💎 {scenario_data['teaser']}"
-            )
-            
-            # Предлагаем выбрать еще сценарий или вернуться
-            keyboard = [
-                [KeyboardButton("🎯 Выбрать другой сценарий")],
-                [KeyboardButton("🔙 В меню продукта")]
-            ]
-            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-            await update.message.reply_text(
-                "Что хотите сделать дальше?",
-                reply_markup=reply_markup
-            )
-            return DEMO_SCENARIOS
+    # Обработка выбора сценария
+    scenario_map = {
+        '🔮 Архетипы': 'архетипы',
+        '🌌 Метафоры': 'метафоры', 
+        '🧠 Самопознание': 'самопознание',
+        '⚡ Конфликт': 'конфликт',
+        '📋 Подготовка': 'подготовка',
+        '🛡️ Возражения': 'возражения'
+    }
     
-    # Если сценарий не найден
-    await update.message.reply_text("Пожалуйста, выберите вариант из меню:")
-    return DEMO_SCENARIOS
-
-async def handle_demo_actions(update: Update, context: CallbackContext) -> int:
-    """Обработка действий после демо"""
-    text = update.message.text
-    product = context.user_data.get('current_product', 'unknown')
-    
-    if text == "🎯 Выбрать другой сценарий":
-        return await show_demo_scenarios(update, context, product)
-    elif text == "🔙 В меню продукта":
-        return await show_product_menu(update, context, product)
+    scenario_key = scenario_map.get(text)
+    if scenario_key and scenario_key in DEMO_SCENARIOS[product]:
+        demo_answer = DEMO_SCENARIOS[product][scenario_key]
+        await update.message.reply_text(demo_answer)
+        
+        # Предлагаем выбрать еще
+        keyboard = [
+            [KeyboardButton("🎯 Другой сценарий")],
+            [KeyboardButton("🔙 В меню")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.message.reply_text("Что дальше?", reply_markup=reply_markup)
+        
+    elif text == "🎯 Другой сценарий":
+        await show_demo_scenarios(update, context, product)
+        
+    elif text == "🔙 В меню":
+        bot_state.user_states[user.id] = 'PRODUCT_MENU'
+        await show_product_menu(update, context, product)
+        
     else:
-        await update.message.reply_text("Пожалуйста, выберите вариант из меню:")
-        return DEMO_SCENARIOS
-
-async def cancel(update: Update, context: CallbackContext) -> int:
-    """Отмена диалога"""
-    await update.message.reply_text(
-        'До свидания! Чтобы начать заново, отправьте /start',
-        reply_markup=ReplyKeyboardMarkup([[]], resize_keyboard=True)
-    )
-    return ConversationHandler.END
+        await update.message.reply_text("Выберите вариант из меню:")
 
 def main():
-    """Основная функция запуска бота"""
-    # Создаем приложение
     application = Application.builder().token(TOKEN).build()
     
-    # Настраиваем обработчики
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
-        states={
-            MAIN_MENU: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main_menu)
-            ],
-            PRODUCT_MENU: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_product_menu)
-            ],
-            DEMO_SCENARIOS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_demo_scenarios),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_demo_actions)
-            ],
-        },
-        fallbacks=[CommandHandler('cancel', cancel)]
-    )
+    # Простые обработчики без ConversationHandler
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    application.add_handler(conv_handler)
-    
-    # Запускаем бота
-    logger.info("Бот запущен и готов к работе!")
+    logger.info("Бот запущен!")
     application.run_polling()
 
 if __name__ == '__main__':
