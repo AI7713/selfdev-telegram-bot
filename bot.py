@@ -10,6 +10,24 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 
+# КОНСТАНТЫ ДЛЯ КАЛЬКУЛЯТОРА ЭКОНОМИКИ
+CALCULATOR_STEPS = [
+    "💰 Себестоимость товара (руб):",
+    "🏷️ Продажная цена (руб):", 
+    "📊 Комиссия маркетплейса (%):",
+    "🚚 Логистика FBS (% от цены):",
+    "📢 Бюджет на рекламу, ACOS (%):",
+    "💸 Налог УСН (%):"
+]
+
+BENCHMARKS = {
+    'наценка': {'низкая': 100, 'средняя': 200, 'высокая': 300},
+    'комиссия_mp': {'низкая': 10, 'средняя': 15, 'высокая': 20},
+    'логистика': {'низкая': 10, 'средняя': 15, 'высокая': 20},
+    'acos': {'низкий': 5, 'средний': 10, 'высокий': 15},
+    'чистая_маржа': {'низкая': 20, 'средняя': 30, 'высокая': 40}
+}
+
 # ЗАЩИЩЕННЫЕ демо-сценарии без раскрытия логики промтов
 DEMO_SCENARIOS = {
     'гримуар': {
@@ -82,7 +100,7 @@ PROMPTS_CATALOG = {
     },
     'Оркестратор проекта': {
         'описание': '🚀 От идеи к плану и исполнению',
-        'для_чего': 'Создание проектов с четкими этапами, сроками и распределением ролей',
+        'для_чего': 'Создание проектов с четкими этапами, срокаи и распределением ролей',
         'кнопка': '📋 Проекты',
         'категория': 'business',
         'демо_ключ': 'проекты'
@@ -178,6 +196,184 @@ class BotState:
 
 bot_state = BotState()
 
+# ФУНКЦИИ КАЛЬКУЛЯТОРА ЭКОНОМИКИ
+def calculate_economy_metrics(data):
+    """Расчет всех финансовых метрик"""
+    себестоимость = data[0]
+    цена = data[1]
+    комиссия_процент = data[2]
+    логистика_процент = data[3]
+    acos_процент = data[4]
+    налог_процент = data[5]
+    
+    # Расчет абсолютных показателей
+    выручка = цена
+    комиссия = выручка * комиссия_процент / 100
+    логистика = выручка * логистика_процент / 100
+    cm1 = выручка - себестоимость - комиссия - логистика
+    реклама = выручка * acos_процент / 100
+    cm2 = cm1 - реклама
+    налог = выручка * налог_процент / 100
+    чистая_прибыль = cm2 - налог
+    
+    # Расчет процентных метрик
+    наценка_процент = ((цена - себестоимость) / себестоимость) * 100 if себестоимость > 0 else 0
+    маржа_cm1_процент = (cm1 / выручка) * 100 if выручка > 0 else 0
+    маржа_cm2_процент = (cm2 / выручка) * 100 if выручка > 0 else 0
+    чистая_маржа_процент = (чистая_прибыль / выручка) * 100 if выручка > 0 else 0
+    
+    return {
+        'выручка': выручка,
+        'себестоимость': себестоимость,
+        'комиссия': комиссия,
+        'комиссия_%': комиссия_процент,
+        'логистика': логистика,
+        'логистика_%': логистика_процент,
+        'cm1': cm1,
+        'маржа_cm1_%': маржа_cm1_процент,
+        'реклама': реклама,
+        'acos_%': acos_процент,
+        'cm2': cm2,
+        'маржа_cm2_%': маржа_cm2_процент,
+        'налог': налог,
+        'налог_%': налог_процент,
+        'чистая_прибыль': чистая_прибыль,
+        'чистая_маржа_%': чистая_маржа_процент,
+        'наценка_%': наценка_процент
+    }
+
+def generate_recommendations(metrics):
+    """Генерация рекомендаций на основе метрик"""
+    recommendations = []
+    
+    # Анализ наценки
+    if metrics['наценка_%'] > BENCHMARKS['наценка']['высокая']:
+        recommendations.append("🚀 Отличная наценка! Товар имеет высокий потенциал прибыли")
+    elif metrics['наценка_%'] < BENCHMARKS['наценка']['низкая']:
+        recommendations.append("📈 Низкая наценка. Рассмотрите повышение цены или поиск поставщика с лучшими условиями")
+    
+    # Анализ комиссии маркетплейса
+    if metrics['комиссия_%'] > BENCHMARKS['комиссия_mp']['высокая']:
+        recommendations.append("📊 Комиссия выше среднего. Рассмотрите маркетплейсы с меньшей комиссией")
+    elif metrics['комиссия_%'] < BENCHMARKS['комиссия_mp']['низкая']:
+        recommendations.append("💰 Низкая комиссия - хорошие условия!")
+    
+    # Анализ логистики
+    if metrics['логистика_%'] > BENCHMARKS['логистика']['высокая']:
+        recommendations.append("🚚 Логистика дороговата. Ищите способы оптимизации доставки или упаковки")
+    elif metrics['логистика_%'] < BENCHMARKS['логистика']['низкая']:
+        recommendations.append("📦 Логистика эффективна!")
+    
+    # Анализ ACOS
+    if metrics['acos_%'] > BENCHMARKS['acos']['высокий']:
+        recommendations.append("📢 Высокий ACOS. Оптимизируйте рекламные кампании или когорты")
+    elif metrics['acos_%'] < BENCHMARKS['acos']['низкий']:
+        recommendations.append("🎯 Эффективная реклама!")
+    
+    # Анализ чистой маржи
+    if metrics['чистая_маржа_%'] > BENCHMARKS['чистая_маржа']['высокая']:
+        recommendations.append("✅ Отличная рентабельность! Товар готов к масштабированию")
+    elif metrics['чистая_маржа_%'] < BENCHMARKS['чистая_маржа']['низкая']:
+        recommendations.append("💸 Низкая рентабельность. Рассмотрите повышение цены или снижение закупочной стоимости")
+    
+    return recommendations if recommendations else ["📊 Показатели в норме. Продолжайте в том же духе!"]
+
+async def calculate_and_show_results(update: Update, context: CallbackContext):
+    """Расчет и показ результатов калькулятора"""
+    data = [context.user_data['calculator_data'][i] for i in range(6)]
+    metrics = calculate_economy_metrics(data)
+    recommendations = generate_recommendations(metrics)
+    
+    # Форматируем вывод
+    report = f"""📊 **ФИНАНСОВЫЙ АНАЛИЗ ТОВАРА**
+
+💰 **ВЫРУЧКА И ЗАТРАТЫ:**
+• Выручка: {metrics['выручка']:.1f} ₽
+• Себестоимость: {metrics['себестоимость']:.1f} ₽
+• Комиссия MP: {metrics['комиссия']:.1f} ₽ ({metrics['комиссия_%']:.1f}%)
+• Логистика FBS: {metrics['логистика']:.1f} ₽ ({metrics['логистика_%']:.1f}%)
+• Реклама (ACOS): {metrics['реклама']:.1f} ₽ ({metrics['acos_%']:.1f}%)
+• Налог УСН: {metrics['налог']:.1f} ₽ ({metrics['налог_%']:.1f}%)
+
+🎯 **УРОВНИ ПРИБЫЛИ:**
+• CM1 (до рекламы): {metrics['cm1']:.1f} ₽ ({metrics['маржа_cm1_%']:.1f}%)
+• CM2 (после рекламы): {metrics['cm2']:.1f} ₽ ({metrics['маржа_cm2_%']:.1f}%)
+• Чистая прибыль: {metrics['чистая_прибыль']:.1f} ₽ ({metrics['чистая_маржа_%']:.1f}%)
+
+📈 **КЛЮЧЕВЫЕ МЕТРИКИ:**
+• Наценка: {metrics['наценка_%']:.1f}% {'🚀' if metrics['наценка_%'] > 300 else '✅' if metrics['наценка_%'] > 200 else '📊'}
+• Рентабельность: {metrics['чистая_маржа_%']:.1f}% {'✅' if metrics['чистая_маржа_%'] > 30 else '📊'}
+
+💡 **РЕКОМЕНДАЦИИ:**
+"""
+    
+    # Добавляем рекомендации
+    for rec in recommendations:
+        report += f"• {rec}\n"
+    
+    keyboard = [
+        [KeyboardButton("🔄 Новый расчет")],
+        [KeyboardButton("🔙 Назад")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(report, reply_markup=reply_markup)
+
+async def start_economy_calculator(update: Update, context: CallbackContext) -> None:
+    """Начало калькулятора экономики"""
+    bot_state.user_states[update.message.from_user.id] = 'ECONOMY_CALCULATOR'
+    context.user_data['calculator_step'] = 0
+    context.user_data['calculator_data'] = {}
+    
+    await update.message.reply_text(
+        "🛍️ **РАСЧЕТ ЭКОНОМИКИ МАРКЕТПЛЕЙСА**\n\n"
+        "Введите данные вашего товара:\n\n"
+        + CALCULATOR_STEPS[0]
+    )
+
+async def handle_economy_calculator(update: Update, context: CallbackContext) -> None:
+    """Обработчик калькулятора с защитой от ошибок"""
+    user = update.message.from_user
+    text = update.message.text
+    step = context.user_data.get('calculator_step', 0)
+    
+    # Обработка навигации
+    if text == "🔙 Назад":
+        if step == 0:
+            # Возврат к демо-меню маркетплейса
+            bot_state.user_states[user.id] = 'DEMO_MENU'
+            await show_demo_scenarios(update, context, 'маркетплейс')
+        else:
+            # Шаг назад в калькуляторе
+            context.user_data['calculator_step'] = step - 1
+            await update.message.reply_text(CALCULATOR_STEPS[step - 1])
+        return
+    
+    if text == "🔄 Новый расчет":
+        context.user_data['calculator_step'] = 0
+        context.user_data['calculator_data'] = {}
+        await start_economy_calculator(update, context)
+        return
+    
+    # Валидация ввода
+    try:
+        value = float(text)
+        if value < 0:
+            await update.message.reply_text("❌ Число должно быть положительным. Попробуйте еще раз:")
+            return
+            
+        context.user_data['calculator_data'][step] = value
+        context.user_data['calculator_step'] = step + 1
+        
+        if step + 1 < len(CALCULATOR_STEPS):
+            await update.message.reply_text(CALCULATOR_STEPS[step + 1])
+        else:
+            await calculate_and_show_results(update, context)
+            
+    except ValueError:
+        await update.message.reply_text("❌ Пожалуйста, введите число:")
+
+# ОСНОВНЫЕ ФУНКЦИИ БОТА (без изменений)
 async def start(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
     logger.info(f"Пользователь {user.first_name} начал работу")
@@ -209,6 +405,8 @@ async def handle_message(update: Update, context: CallbackContext) -> None:
         await handle_tool_menu(update, context)
     elif current_state == 'DEMO_MENU':
         await handle_demo_menu(update, context)
+    elif current_state == 'ECONOMY_CALCULATOR':  # ← НОВОЕ СОСТОЯНИЕ
+        await handle_economy_calculator(update, context)
 
 async def handle_main_menu(update: Update, context: CallbackContext) -> None:
     user = update.message.from_user
@@ -410,17 +608,21 @@ async def handle_demo_menu(update: Update, context: CallbackContext) -> None:
     reverse_button_mapping = {v: k for k, v in DEMO_BUTTON_NAMES.items()}
     scenario_key = reverse_button_mapping.get(text)
     
+    # ОСОБЫЙ СЛУЧАЙ ДЛЯ КАЛЬКУЛЯТОРА ЭКОНОМИКИ
     if scenario_key and scenario_key in DEMO_SCENARIOS[product]:
-        demo_answer = DEMO_SCENARIOS[product][scenario_key]
-        await update.message.reply_text(demo_answer)
-        
-        keyboard = [
-            [KeyboardButton("🎯 Другой сценарий")],
-            [KeyboardButton("🔙 В меню инструмента")]
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-        await update.message.reply_text("Что дальше?", reply_markup=reply_markup)
-        
+        if product == 'маркетплейс' and scenario_key == 'экономика':
+            await start_economy_calculator(update, context)
+        else:
+            demo_answer = DEMO_SCENARIOS[product][scenario_key]
+            await update.message.reply_text(demo_answer)
+            
+            keyboard = [
+                [KeyboardButton("🎯 Другой сценарий")],
+                [KeyboardButton("🔙 В меню инструмента")]
+            ]
+            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            await update.message.reply_text("Что дальше?", reply_markup=reply_markup)
+    
     elif text == "🎯 Другой сценарий":
         await show_demo_scenarios(update, context, product)
         
@@ -437,7 +639,7 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    logger.info("Бот запущен с защищенной структурой демо-описаний!")
+    logger.info("Бот запущен с интегрированным калькулятором экономики!")
     application.run_polling()
 
 if __name__ == '__main__':
