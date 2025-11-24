@@ -27,6 +27,7 @@ WEBHOOK_URL = os.environ.get("WEBHOOK_URL") # URL вашего деплоя на
 groq_client: Groq | None = None
 if GROQ_API_KEY:
     try:
+        # Проверяем инициализацию, чтобы убедиться, что ключ корректен
         groq_client = Groq(api_key=GROQ_API_KEY)
     except Exception as e:
         logger.error(f"Ошибка инициализации Groq клиента: {e}")
@@ -51,14 +52,14 @@ SYSTEM_PROMPTS: Dict[str, str] = {
 
 # СЕКЦИЯ 2: ВСТАВЬТЕ СЮДА ВАШИ ДЛИННЫЕ ТЕКСТЫ ДЛЯ DEMO
 DEMO_SCENARIOS: Dict[str, str] = {
-    'demo_grimoire': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ГРИМУАРА. (Полный текст)",
-    'demo_negotiator': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ПЕРЕГОВОРЩИКА. (Полный текст)",
-    'demo_analyzer': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_АНАЛИТИКА. (Полный текст)",
-    'demo_coach': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_КОУЧА. (Полный текст)",
-    'demo_generator': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ГЕНЕРАТОРА. (Полный текст)",
-    'demo_editor': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_РЕДАКТОРА. (Полный текст)",
-    'demo_marketer': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_МАРКЕТОЛОГА. (Полный текст)",
-    'demo_hr': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_HR-РЕКРУТЕРА. (Полный текст)",
+    'grimoire': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ГРИМУАРА. (Полный текст)",
+    'negotiator': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ПЕРЕГОВОРЩИКА. (Полный текст)",
+    'analyzer': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_АНАЛИТИКА. (Полный текст)",
+    'coach': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_КОУЧА. (Полный текст)",
+    'generator': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ГЕНЕРАТОРА. (Полный текст)",
+    'editor': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_РЕДАКТОРА. (Полный текст)",
+    'marketer': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_МАРКЕТОЛОГА. (Полный текст)",
+    'hr': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_HR-РЕКРУТЕРА. (Полный текст)",
 }
 
 # ==============================================================================
@@ -89,6 +90,7 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             {"role": "user", "content": user_query}
         ]
 
+        # Используем модель Llama 3 8B, быструю и эффективную
         chat_completion = groq_client.chat.completions.create(
             messages=messages,
             model="llama3-8b-8192"
@@ -212,7 +214,8 @@ async def ai_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     
     callback_data = query.data
-    prompt_key = callback_data.split('_')[1]
+    # Получаем ключ промта: 'ai_grimoire_self' -> 'grimoire'
+    prompt_key = callback_data.split('_')[1] 
 
     context.user_data['current_ai_key'] = prompt_key
     
@@ -238,11 +241,15 @@ async def show_demo_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
     
-    demo_key = query.data.replace('demo_', 'demo_') # Сохраняем ключ демо
+    # Ключ демо-сценария совпадает с ключом промта (например, 'demo_grimoire' -> 'grimoire')
+    demo_key = query.data.split('_')[1] 
     text_content = DEMO_SCENARIOS.get(demo_key, "⚠️ Описание демо-сценария не найдено. Проверьте ваш словарь DEMO_SCENARIOS.")
     
-    # Определяем, к какому меню вернуться
-    back_to_menu_key = 'menu_self' if 'self' in demo_key else 'menu_business'
+    # Определяем, к какому меню вернуться (постфикс не нужен, так как DEMO_SCENARIOS ключи не содержат _self/_business)
+    # Определяем меню по предыдущему состоянию
+    back_to_menu_key = 'menu_self' 
+    if context.user_data.get('state') == STATE_BUSINESS_MENU:
+        back_to_menu_key = 'menu_business'
     
     keyboard = [[InlineKeyboardButton("🔙 Назад к выбору AI", callback_data=back_to_menu_key)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -304,6 +311,7 @@ async def handle_calculator_input(update: Update, context: ContextTypes.DEFAULT_
     step = context.user_data.get('calc_step', 0)
 
     try:
+        # Универсальная обработка ввода чисел
         value = float(message_text.replace(',', '.').strip())
         calc_data = context.user_data.get('calc_data', {})
 
@@ -391,7 +399,13 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         
     elif context.user_data.get('active_groq_mode'):
         active_mode = context.user_data['active_groq_mode']
-        return await handle_groq_request(update, context, active_mode)
+        # Проверяем, что AI режим активирован
+        if active_mode in SYSTEM_PROMPTS:
+            return await handle_groq_request(update, context, active_mode)
+        else:
+            await update.message.reply_text("❓ Неизвестный AI режим. Нажмите /start для сброса.")
+            return STATE_MAIN_MENU
+
     
     elif current_state in (STATE_AI_SELECTION, STATE_BUSINESS_MENU):
         await update.message.reply_text("❓ Вы отправили текст, но не активировали ни один из ИИ-инструментов. Нажмите на кнопку 'Активировать' под нужным инструментом, чтобы начать диалог, или /start для возврата в главное меню.")
@@ -425,44 +439,49 @@ else:
 
 async def run_webhook():
     """Асинхронный запуск Webhook-сервера."""
-    if not WEBHOOK_URL:
-        logger.error("❌ WEBHOOK_URL не установлен. Запуск в режиме Webhook невозможен.")
-        return
-        
-    # Путь, по которому Telegram будет отправлять запросы (например, /selfdev-bot-webhook)
-    webhook_path = "/"
-    full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
-
-    await application.bot.set_webhook(url=full_webhook_url)
-    logger.info(f"✅ Webhook установлен: {full_webhook_url}")
-
-    # Запуск встроенного Webhook-сервера python-telegram-bot
-    # Обратите внимание: listen='0.0.0.0' и port=PORT - это критично для Render
-    await application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=webhook_path,
-        webhook_url=full_webhook_url
-    )
-    logger.info("🚀 Бот запущен в режиме Webhook на Render.")
-
-
-def main():
-    """Основная точка входа, определяющая режим запуска."""
-    if not TELEGRAM_TOKEN or not application:
+    if not application:
         return
 
-    # Если есть переменная PORT (как на Render), запускаем Webhook
+    # Если мы запускаемся на Render (есть PORT и WEBHOOK_URL), то запускаем Webhook
     if os.environ.get('PORT') and WEBHOOK_URL:
-        # Запуск асинхронной функции Webhook
-        asyncio.run(run_webhook())
+        # Путь, по которому Telegram будет отправлять запросы (например, /selfdev-bot-webhook)
+        webhook_path = "/"
+        full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
+        
+        # Установка Webhook для Telegram
+        await application.bot.set_webhook(url=full_webhook_url)
+        logger.info(f"✅ Webhook установлен: {full_webhook_url}")
+
+        # Запуск встроенного Webhook-сервера python-telegram-bot
+        # Обратите внимание: listen='0.0.0.0' и port=PORT - это критично для Render
+        await application.run_webhook(
+            listen="0.0.0.0",
+            port=PORT,
+            url_path=webhook_path,
+            webhook_url=full_webhook_url
+        )
+        logger.info("🚀 Бот запущен в режиме Webhook на Render.")
     else:
-        # Локальный запуск (Polling)
-        logger.info("📡 Бот запущен в режиме Polling (Локально)")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Локальный запуск (Polling) или ошибка конфигурации
+        logger.error("❌ Недостаточно переменных окружения (PORT или WEBHOOK_URL) для Webhook. Запуск невозможен.")
 
 
 if __name__ == '__main__':
-    main()
-
-    
+    # В этом блоке мы используем более чистый метод, чтобы избежать
+    # конфликта event loop, вызывая run_webhook напрямую, если TELEGRAM_TOKEN есть.
+    if TELEGRAM_TOKEN:
+        try:
+            # Пытаемся запустить Webhook в стандартном цикле asyncio
+            asyncio.run(run_webhook())
+        except RuntimeError as e:
+            # Обработка случая, когда Render уже запустил loop (ошибка: RuntimeError: This event loop is already running)
+            if "This event loop is already running" in str(e):
+                logger.warning("Event loop уже запущен. Пробуем запустить run_webhook без asyncio.run()")
+                # Добавляем задачу в уже существующий цикл
+                asyncio.ensure_future(run_webhook())
+                # Запускаем цикл в режиме ожидания (run_forever), чтобы процесс не завершился
+                # Это необходимо для постоянной работы на Render
+                asyncio.get_event_loop().run_forever()
+            else:
+                # Если ошибка другая, выбрасываем ее
+                raise
