@@ -11,6 +11,8 @@ from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from groq import Groq
+# Добавляем явный импорт исключений Groq для более точной обработки ошибок
+from groq import exceptions 
 from telegram.constants import ParseMode
 
 # ==============================================================================
@@ -86,10 +88,10 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             {"role": "user", "content": user_query}
         ]
 
-        # ИСПРАВЛЕНИЕ: Замена устаревшей модели на актуальную (llama-3.1-8b-8192)
+        # ГЛАВНОЕ ИСПРАВЛЕНИЕ: Переключение на стабильную и доступную модель Mixtral
         chat_completion = groq_client.chat.completions.create(
             messages=messages,
-            model="llama-3.1-8b-8192" 
+            model="mixtral-8x7b-32768" 
         )
 
         ai_response = chat_completion.choices[0].message.content
@@ -99,9 +101,31 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode=ParseMode.MARKDOWN
         )
 
+    # Улучшенное логирование: ловим конкретные ошибки Groq API
+    except exceptions.APIError as e:
+        logger.error(f"КОНКРЕТНАЯ ОШИБКА GROQ API (HTTP {e.status_code}): {e.body}")
+        
+        # Если это ошибка 429 (Rate Limit), сообщаем об этом
+        if e.status_code == 429:
+            user_message = "❌ **Превышен лимит запросов (Rate Limit Exceeded).** Пожалуйста, подождите минуту и попробуйте снова, или проверьте ваши лимиты в Groq Console."
+        # Если это ошибка 400 (Bad Request - после фикса модели это может быть лимит или проблема с данными)
+        elif e.status_code == 400:
+            user_message = "❌ **Ошибка 400: Неверный запрос или лимиты.** Проверьте Groq Console. Возможно, превышен общий лимит токенов."
+        # Если это ошибка 401 (Unauthorized - неверный ключ)
+        elif e.status_code == 401:
+            user_message = "❌ **Ошибка 401: Неверный API ключ Groq.** Убедитесь, что ваш ключ установлен правильно в Render."
+        # Другие HTTP-ошибки
+        else:
+            user_message = f"❌ **Ошибка Groq API:** Проблема с сервисом или лимитами. Код ошибки: {e.status_code}."
+            
+        await update.message.chat.send_message(
+            user_message,
+            parse_mode=ParseMode.MARKDOWN
+        )
+
     except Exception as e:
-        logger.error(f"Ошибка при работе с Groq API: {e}")
-        # Выводим сообщение об ошибке для пользователя
+        logger.error(f"Неизвестная ошибка при работе с Groq API: {e}")
+        # Fallback к общему сообщению
         await update.message.chat.send_message(
             "Произошла ошибка при обращении к AI. Проверьте ваш API ключ Groq или попробуйте позже.",
             parse_mode=ParseMode.MARKDOWN
@@ -141,7 +165,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # Отправляем сообщение с Inline Keyboards И прикрепляем Reply Keyboard
     await update.message.reply_text(
         "👋 Привет! Используйте нижнюю панель для навигации.", 
-        reply_markup=REPLY_KEYBOARD, # <-- ДОБАВЛЕНА ПОСТОЯННАЯ КЛАВИАТУРА
+        reply_markup=REPLY_KEYBOARD, 
         reply_to_message_id=update.message.message_id
     )
     # Отправляем Inline Keyboard в отдельном сообщении или редактируем (тут лучше отдельное)
