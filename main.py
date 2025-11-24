@@ -457,7 +457,8 @@ async def run_webhook():
         logger.info(f"✅ Webhook установлен: {full_webhook_url}")
 
         # 2. Запуск встроенного Webhook-сервера python-telegram-bot
-        # Это блокирующая асинхронная операция, которая запустит сервер.
+        # await application.run_webhook(...) блокирует выполнение, 
+        # но мы управляем циклом снаружи.
         await application.run_webhook(
             listen="0.0.0.0",
             port=PORT,
@@ -471,19 +472,17 @@ async def run_webhook():
 
 
 if __name__ == '__main__':
-    # САМЫЙ ЧИСТЫЙ СПОСОБ: Прямой запуск асинхронной задачи в цикле событий.
-    # Это полностью исключает конфликт с asyncio.run().
+    # САМЫЙ ЧИСТЫЙ СПОСОБ: Прямой запуск асинхронной задачи в НОВОМ цикле.
     if TELEGRAM_TOKEN and os.environ.get('PORT'):
         try:
-            # Получаем существующий или создаем новый цикл
-            loop = asyncio.get_event_loop()
+            # 1. Принудительно создаем новый цикл, чтобы избежать конфликта с циклом Render.
+            loop = asyncio.new_event_loop() 
+            asyncio.set_event_loop(loop)
             
-            # Добавляем асинхронную функцию как задачу в цикл
-            # ВНИМАНИЕ: Запуск run_webhook() должен быть создан как задача,
-            # а не выполнен синхронно.
+            # 2. Добавляем асинхронную функцию как задачу.
             loop.create_task(run_webhook())
             
-            # Запускаем цикл навсегда, чтобы процесс не завершился (критично для Render)
+            # 3. Запускаем цикл навсегда, чтобы процесс не завершился.
             loop.run_forever()
             
         except Exception as e:
