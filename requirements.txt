@@ -1,4 +1,4 @@
-python-telegram-bot==20.0
-requests==2.31.0
-groq==0.36.0  # Использована последняя доступная стабильная версия
-gunicorn==22.0.0
+python-telegram-bot
+groq
+aiohttp
+httpx
