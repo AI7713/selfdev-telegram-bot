@@ -87,11 +87,11 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             {"role": "user", "content": user_query}
         ]
 
-        # ИСПРАВЛЕНИЕ: Переключаемся на стабильную модель Llama 3 8B, 
-        # чтобы избежать проблем с обновлением имен Mixtral.
+        # ИСПРАВЛЕНИЕ: Переключаемся на самый актуальный стабильный релиз Llama 3
+        # Если этот fails, пользователь должен проверить Groq Console
         chat_completion = groq_client.chat.completions.create(
             messages=messages,
-            model="llama3-8b-8192" 
+            model="llama-3.1-8b-instant" 
         )
 
         ai_response = chat_completion.choices[0].message.content
@@ -110,7 +110,11 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             user_message = "❌ **Превышен лимит запросов (Rate Limit Exceeded).** Пожалуйста, подождите минуту и попробуйте снова, или проверьте ваши лимиты в Groq Console."
         # Если это ошибка 400 (Bad Request - после фикса модели это может быть лимит или проблема с данными)
         elif e.status_code == 400:
-            user_message = "❌ **Ошибка 400: Неверный запрос или лимиты.** Проверьте Groq Console. Возможно, превышен общий лимит токенов."
+            # Отдельное сообщение для ошибки 400, связанной с устаревшим именем модели
+            if "decommissioned" in str(e.body):
+                user_message = "❌ **Ошибка 400: Модель Groq устарела.** Платформа Groq быстро выводит модели из эксплуатации. Пожалуйста, проверьте [Groq Console](https://console.groq.com/docs/deprecations) и вставьте актуальное имя модели (например, `llama-3.1-8b-instant` или другое) в файл `main.py`."
+            else:
+                user_message = "❌ **Ошибка 400: Неверный запрос или лимиты.** Проверьте Groq Console. Возможно, превышен общий лимит токенов."
         # Если это ошибка 401 (Unauthorized - неверный ключ)
         elif e.status_code == 401:
             user_message = "❌ **Ошибка 401: Неверный API ключ Groq.** Убедитесь, что ваш ключ установлен правильно в Render."
