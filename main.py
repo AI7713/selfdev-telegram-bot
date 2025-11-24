@@ -3,6 +3,10 @@ import logging
 import asyncio
 from typing import Dict, Any
 
+# НОВЫЕ ИМПОРТЫ для AIOHTTP и HTTPX
+import httpx 
+from aiohttp import web
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from groq import Groq
@@ -421,7 +425,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return current_state
 
 # ==============================================================================
-# 4. НАСТРОЙКА И ЗАПУСК БОТА (WEBHOOK/RENDER)
+# 4. НАСТРОЙКА И ЗАПУСК БОТА (WEBHOOK/RENDER) - ФИНАЛЬНЫЙ ФИКС AIOHTTP
 # ==============================================================================
 
 if not TELEGRAM_TOKEN:
@@ -441,59 +445,76 @@ else:
     application.add_handler(CallbackQueryHandler(activate_access, pattern='^activate_.*$'))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
+# --- AIOHTTP HANDLER ---
+async def telegram_webhook_handler(request: web.Request) -> web.Response:
+    """Обрабатывает входящие запросы от Telegram и передает их PTB."""
+    global application
+    if application is None:
+        return web.Response(status=500, text="Application not initialized.")
+    
+    # Получаем тело запроса
+    try:
+        data = await request.json()
+    except Exception:
+        return web.Response(status=400, text="Invalid JSON")
 
-async def run_webhook():
-    """Асинхронный запуск Webhook-сервера. Используется как точка входа."""
-    if not application:
+    # Передаем обновление в python-telegram-bot
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
+
+    # Telegram ожидает HTTP 200 OK как подтверждение получения
+    return web.Response(text="OK")
+
+
+async def init_webhook_and_start_server(application: Application):
+    """Устанавливает webhook и запускает AIOHTTP сервер."""
+    if not os.environ.get('PORT') or not WEBHOOK_URL:
+        logger.error("❌ Недостаточно переменных окружения (PORT или WEBHOOK_URL) для Webhook.")
         return
 
-    if os.environ.get('PORT') and WEBHOOK_URL:
-        webhook_path = "/"
-        full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
-        
-        # 1. Установка Webhook для Telegram
-        await application.bot.set_webhook(url=full_webhook_url)
-        logger.info(f"✅ Webhook установлен: {full_webhook_url}")
-
-        # 2. Запуск встроенного Webhook-сервера python-telegram-bot
-        # Мы не запускаем внешний цикл. run_webhook становится точкой входа.
-        await application.run_webhook(
-            listen="0.0.0.0",
-            port=PORT,
-            url_path=webhook_path,
-            webhook_url=full_webhook_url
+    webhook_path = "/"
+    full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
+    
+    # 1. Установка Webhook через HTTPX (внешний клиент)
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook",
+            json={"url": full_webhook_url}
         )
-        logger.info("🚀 Бот запущен в режиме Webhook на Render.")
-    else:
-        logger.error("❌ Недостаточно переменных окружения (PORT или WEBHOOK_URL) для Webhook. Запуск невозможен.")
+        if response.status_code == 200 and response.json().get('ok'):
+            logger.info(f"✅ Webhook успешно установлен: {full_webhook_url}")
+        else:
+            logger.error(f"❌ Ошибка установки Webhook: {response.text}")
+            return
+
+
+    # 2. Запуск AIOHTTP сервера
+    # Мы используем AIOHTTP для прослушивания порта, минуя внутреннюю логику PTB.
+    app_runner = web.AppRunner(web.Application().add_routes([
+        web.post(webhook_path, telegram_webhook_handler),
+    ]))
+    
+    await app_runner.setup()
+    site = web.TCPSite(app_runner, '0.0.0.0', PORT)
+    
+    logger.info(f"🚀 AIOHTTP Server запущен на порту {PORT}")
+    
+    # Запускаем Application для инициализации внутренних структур PTB
+    await application.initialize()
+    
+    await site.start()
+
+    # Ожидаем завершения (чтобы процесс Render не завершился сразу)
+    await asyncio.Future() 
 
 
 if __name__ == '__main__':
-    # ОСНОВНАЯ ТОЧКА ЗАПУСКА
-    # Мы используем asyncio.run() для запуска нашей основной корутины run_webhook.
-    # Это позволяет избежать ручного управления циклом run_forever().
-    if TELEGRAM_TOKEN and os.environ.get('PORT'):
+    if TELEGRAM_TOKEN and os.environ.get('PORT') and application:
         try:
-            # Убедимся, что цикл не запущен
-            try:
-                loop = asyncio.get_running_loop()
-                # Если цикл уже есть, мы просто запускаем нашу корутину в нём.
-                # Но для Render, где процесс может запускаться с нуля,
-                # лучше использовать asyncio.run().
-            except RuntimeError:
-                 pass # Цикл не запущен, это хорошо
-
-            logger.info("Starting bot via asyncio.run(run_webhook())")
-            asyncio.run(run_webhook())
-            
-        except RuntimeError as e:
-            # Если ошибка "This event loop is already running" все еще возникает, 
-            # мы пробуем альтернативный (более старый) метод, который иногда работает в нестандартных средах.
-            if "already running" in str(e):
-                logger.warning("RuntimeError caught. Trying alternative loop management.")
-                loop = asyncio.get_event_loop()
-                loop.run_until_complete(run_webhook())
-            else:
-                 logger.error(f"Критическая ошибка при запуске бота: {e}")
+            # Использование asyncio.run для запуска aiohttp сервера
+            asyncio.run(init_webhook_and_start_server(application))
+        except KeyboardInterrupt:
+            logger.info("Бот остановлен вручную.")
         except Exception as e:
-            logger.error(f"Неожиданная ошибка при запуске: {e}")
+            logger.error(f"Критическая ошибка при запуске бота: {e}")
+       
