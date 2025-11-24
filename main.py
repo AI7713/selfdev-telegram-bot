@@ -11,8 +11,8 @@ from aiohttp import web
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from groq import Groq
-# Добавляем явный импорт исключений Groq для более точной обработки ошибок
-from groq import exceptions 
+# ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ ИМПОРТА: Импортируем класс APIError напрямую
+from groq.lib.error import APIError 
 from telegram.constants import ParseMode
 
 # ==============================================================================
@@ -88,7 +88,7 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             {"role": "user", "content": user_query}
         ]
 
-        # ГЛАВНОЕ ИСПРАВЛЕНИЕ: Переключение на стабильную и доступную модель Mixtral
+        # Используем стабильную модель Mixtral 8x7B
         chat_completion = groq_client.chat.completions.create(
             messages=messages,
             model="mixtral-8x7b-32768" 
@@ -101,8 +101,8 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode=ParseMode.MARKDOWN
         )
 
-    # Улучшенное логирование: ловим конкретные ошибки Groq API
-    except exceptions.APIError as e:
+    # Используем корректно импортированный класс APIError
+    except APIError as e:
         logger.error(f"КОНКРЕТНАЯ ОШИБКА GROQ API (HTTP {e.status_code}): {e.body}")
         
         # Если это ошибка 429 (Rate Limit), сообщаем об этом
