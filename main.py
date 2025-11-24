@@ -10,9 +10,8 @@ from aiohttp import web
 # Импорты для Reply Keyboard и Telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
-from groq import Groq
-# ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ ИМПОРТА: Импортируем класс APIError напрямую
-from groq.lib.error import APIError 
+# ФИНАЛЬНЫЙ СТАБИЛЬНЫЙ ИМПОРТ: Импортируем Groq и APIError напрямую из основного пакета
+from groq import Groq, APIError 
 from telegram.constants import ParseMode
 
 # ==============================================================================
