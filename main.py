@@ -1,0 +1,494 @@
+import os
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from groq import Groq
+import requests
+import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+import asyncio
+
+# ==============================================================================
+# 0. КОНФИГУРАЦИЯ И ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
+# ==============================================================================
+
+# Настройка логирования
+logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Получение переменных окружения (ТОКЕНЫ)
+# Вы должны настроить эти переменные на хостинге Render!
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL") # URL вашего деплоя на Render (например, https://my-awesome-bot.onrender.com)
+
+# Инициализация Groq клиента
+groq_client = None
+if GROQ_API_KEY:
+    try:
+        groq_client = Groq(api_key=GROQ_API_KEY)
+    except Exception as e:
+        logger.error(f"Ошибка инициализации Groq клиента: {e}")
+else:
+    logger.warning("GROQ_API_KEY не установлен. Функции AI будут недоступны.")
+
+# ==============================================================================
+# 1. МЕСТО ДЛЯ ВАШИХ ТЕКСТОВ И ПРОМТОВ (ОБНОВИТЕ ЭТИ ДВЕ СЕКЦИИ!)
+# ==============================================================================
+
+# СЕКЦИЯ 1: ВСТАВЬТЕ СЮДА ВАШИ СИСТЕМНЫЕ ПРОМТЫ
+# Это секретные инструкции, которые Groq увидит, но пользователь - нет.
+# ПРИМЕР: 'grimoire': "Действуй как мистический помощник, используй образное описание...",
+SYSTEM_PROMPTS = {
+    'grimoire': "ВСТАВЬТЕ_СЮДА_ВАШ_ПРОМТ_ДЛЯ_ГРИМУАРА: Действуй как мистический помощник, используй образное и метафорическое описание...",
+    'negotiator': "ВСТАВЬТЕ_СЮДА_ВАШ_ПРОМТ_ДЛЯ_ПЕРЕГОВОРЩИКА: Ты жесткий, требовательный тренер по переговорам. Отвечай кратко, без лишних эмоций, сразу переходи к сути...",
+    'analyzer': "ВСТАВЬТЕ_СЮДА_ВАШ_ПРОМТ_ДЛЯ_АНАЛИТИКА: Ты финансовый аналитик с доступом к последним рыночным данным. Отвечай строго по фактам, используя только проверенную информацию. Используй Google Search для поиска актуальных данных.",
+    'coach': "ВСТАВЬТЕ_СЮДА_ВАШ_ПРОМТ_ДЛЯ_КОУЧА",
+    'generator': "ВСТАВЬТЕ_СЮДА_ВАШ_ПРОМТ_ДЛЯ_ГЕНЕРАТОРА",
+    'editor': "ВСТАВЬТЕ_СЮДА_ВАШ_ПРОМТ_ДЛЯ_РЕДАКТОРА",
+    'marketer': "ВСТАВЬТЕ_СЮДА_ВАШ_ПРОМТ_ДЛЯ_МАРКЕТОЛОГА",
+    'hr': "ВСТАВЬТЕ_СЮДА_ВАШ_ПРОМТ_ДЛЯ_HR-РЕКРУТЕРА",
+    # Если у вас есть другие 2 промта, добавьте их сюда с уникальными ключами
+}
+
+# СЕКЦИЯ 2: ВСТАВЬТЕ СЮДА ВАШИ ДЛИННЫЕ ТЕКСТЫ ДЛЯ DEMO
+# Здесь должны быть полные тексты, которые выводились при нажатии на демо-сценарий.
+DEMO_SCENARIOS = {
+    'demo_grimoire': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ГРИМУАРА. (Полный текст)",
+    'demo_negotiator': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ПЕРЕГОВОРЩИКА. (Полный текст)",
+    'demo_analyzer': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_АНАЛИТИКА. (Полный текст)",
+    'demo_coach': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_КОУЧА. (Полный текст)",
+    'demo_generator': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_ГЕНЕРАТОРА. (Полный текст)",
+    'demo_editor': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_РЕДАКТОРА. (Полный текст)",
+    'demo_marketer': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_МАРКЕТОЛОГА. (Полный текст)",
+    'demo_hr': "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ_ДЕМО_ДЛЯ_HR-РЕКРУТЕРА. (Полный текст)",
+    # Добавьте остальные тексты для демо-сценариев
+}
+
+# ==============================================================================
+# 2. ФУНКЦИИ ГЕНЕРАЦИИ ТЕКСТА ЧЕРЕЗ GROQ
+# ==============================================================================
+
+async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE, prompt_key: str):
+    """Отправляет запрос в Groq, используя системный промт по ключу."""
+    if not groq_client:
+        await update.message.chat.send_message("⚠️ AI-функции недоступны. Проверьте, установлен ли GROQ_API_KEY.")
+        return
+
+    user_query = update.message.text
+    system_prompt = SYSTEM_PROMPTS.get(prompt_key, "Вы — полезный ассистент.")
+
+    # Отправка сообщения о начале обработки
+    await update.message.chat.send_message(f"⌛ **{prompt_key.capitalize()}** обрабатывает ваш запрос...", parse_mode='Markdown')
+
+    try:
+        # 1. Формируем запрос
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_query}
+        ]
+
+        # 2. Вызываем Groq API
+        chat_completion = groq_client.chat.completions.create(
+            messages=messages,
+            model="llama3-8b-8192" # Быстрая и качественная модель от Groq
+        )
+
+        ai_response = chat_completion.choices[0].message.content
+
+        # 3. Отправляем ответ пользователю
+        await update.message.chat.send_message(
+            f"**🤖 Ответ {prompt_key.capitalize()}:**\n\n{ai_response}",
+            parse_mode='Markdown'
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при работе с Groq API: {e}")
+        await update.message.chat.send_message(
+            "Произошла ошибка при обращении к AI. Проверьте ваш API ключ Groq или попробуйте позже.",
+            parse_mode='Markdown'
+        )
+
+# ==============================================================================
+# 3. ВСЕ ОСТАЛЬНЫЕ ФУНКЦИИ (ВАША ЛОГИКА)
+# ==============================================================================
+
+# Константы для состояний
+STATE_MAIN_MENU = 0
+STATE_SELF_MENU = 1
+STATE_BUSINESS_MENU = 2
+STATE_AI_SELECTION_SELF = 3
+STATE_AI_SELECTION_BUSINESS = 4
+STATE_CALCULATOR = 5
+
+# --- Общие Хендлеры и Меню ---
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает команду /start и выводит главное меню."""
+    if not update.message: return STATE_MAIN_MENU
+
+    keyboard = [
+        [InlineKeyboardButton("Для себя (ИИ-инструменты)", callback_data='menu_self')],
+        [InlineKeyboardButton("Для дела (Калькуляторы и ИИ-инструменты)", callback_data='menu_business')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text("👋 Привет! Выберите раздел:", reply_markup=reply_markup)
+    
+    # Устанавливаем начальное состояние
+    context.user_data['state'] = STATE_MAIN_MENU
+    context.user_data['active_groq_mode'] = None
+    return STATE_MAIN_MENU
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Выводит главное меню после нажатия кнопки 'В главное меню'."""
+    query = update.callback_query
+    if query:
+        await query.answer()
+        keyboard = [
+            [InlineKeyboardButton("Для себя (ИИ-инструменты)", callback_data='menu_self')],
+            [InlineKeyboardButton("Для дела (Калькуляторы и ИИ-инструменты)", callback_data='menu_business')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("👋 Выберите раздел:", reply_markup=reply_markup)
+        context.user_data['state'] = STATE_MAIN_MENU
+        context.user_data['active_groq_mode'] = None
+    return STATE_MAIN_MENU
+
+# --- Меню "Для себя" ---
+
+async def menu_self(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает выбор 'Для себя' и выводит меню выбора AI."""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [
+        [InlineKeyboardButton("🔮 Гримуар", callback_data='ai_grimoire_self'), 
+         InlineKeyboardButton("📈 Аналитик", callback_data='ai_analyzer_self')],
+        [InlineKeyboardButton("🧘 Коуч", callback_data='ai_coach_self'), 
+         InlineKeyboardButton("💡 Генератор", callback_data='ai_generator_self')],
+        [InlineKeyboardButton("🔙 В главное меню", callback_data='main_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text("Вы выбрали *Для себя*. Выберите ИИ-инструмент:", reply_markup=reply_markup, parse_mode='Markdown')
+    context.user_data['state'] = STATE_AI_SELECTION_SELF
+    context.user_data['active_groq_mode'] = None
+    return STATE_AI_SELECTION_SELF
+
+# --- Меню "Для дела" ---
+
+async def menu_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает выбор 'Для дела' и выводит меню выбора AI/Калькулятора."""
+    query = update.callback_query
+    await query.answer()
+    
+    keyboard = [
+        [InlineKeyboardButton("📊 Калькулятор маркетплейсов", callback_data='menu_calculator')],
+        [InlineKeyboardButton("🗣️ Переговорщик", callback_data='ai_negotiator_business'), 
+         InlineKeyboardButton("📝 Редактор", callback_data='ai_editor_business')],
+        [InlineKeyboardButton("🎯 Маркетолог", callback_data='ai_marketer_business'), 
+         InlineKeyboardButton("🚀 HR-рекрутер", callback_data='ai_hr_business')],
+        [InlineKeyboardButton("🔙 В главное меню", callback_data='main_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await query.edit_message_text("Вы выбрали *Для дела*. Выберите инструмент:", reply_markup=reply_markup, parse_mode='Markdown')
+    context.user_data['state'] = STATE_BUSINESS_MENU
+    context.user_data['active_groq_mode'] = None
+    return STATE_BUSINESS_MENU
+
+# --- Обработка выбора AI ---
+
+def get_ai_keyboard(prompt_key: str, back_button: str):
+    """Возвращает клавиатуру для выбранного AI с демо-сценарием и платным доступом."""
+    keyboard = [
+        [InlineKeyboardButton("💡 Демо-сценарий (что он умеет?)", callback_data=f'demo_{prompt_key}')],
+        [InlineKeyboardButton("✅ Активировать платный доступ (10 кнопок)", callback_data=f'activate_{prompt_key}')],
+        [InlineKeyboardButton("🔙 Назад", callback_data=back_button)]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+async def ai_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает выбор конкретного AI и предлагает демо или активацию."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Извлекаем ключ AI из callback_data (например, 'ai_grimoire_self' -> 'grimoire')
+    callback_data = query.data
+    prompt_key = callback_data.split('_')[1] # Например, 'grimoire'
+
+    # Сохраняем выбранный ключ AI в контексте пользователя для последующей обработки
+    context.user_data['current_ai_key'] = prompt_key
+    
+    if callback_data.endswith('_self'):
+        back_button = 'menu_self'
+    else:
+        back_button = 'menu_business'
+        
+    reply_markup = get_ai_keyboard(prompt_key, back_button)
+
+    await query.edit_message_text(
+        f"Вы выбрали **{prompt_key.capitalize()}**.\n\n"
+        f"Чтобы начать, изучите демо-сценарий или активируйте доступ.", 
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    context.user_data['state'] = STATE_AI_SELECTION_SELF # Состояние остается прежним, ждем выбора
+    context.user_data['active_groq_mode'] = None
+    return context.user_data['state']
+
+async def show_demo_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Выводит длинный текст демо-сценария для выбранного AI."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Извлекаем ключ демо из callback_data (например, 'demo_grimoire')
+    demo_key = query.data
+    text_content = DEMO_SCENARIOS.get(demo_key, "⚠️ Описание демо-сценария не найдено. Проверьте ваш словарь DEMO_SCENARIOS.")
+    
+    # Определяем, к какому меню вернуться
+    back_to_menu_key = 'menu_self' if 'self' in demo_key else 'menu_business'
+    
+    keyboard = [[InlineKeyboardButton("🔙 Назад к выбору AI", callback_data=back_to_menu_key)]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await query.edit_message_text(
+        text_content, 
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+    # Возвращаемся в меню выбора (для себя или для бизнеса)
+    context.user_data['state'] = STATE_AI_SELECTION_SELF if back_to_menu_key == 'menu_self' else STATE_BUSINESS_MENU
+    return context.user_data['state']
+
+async def activate_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Обрабатывает активацию платного доступа. 
+    Меняет состояние, чтобы следующие сообщения отправлялись в Groq с нужным промтом.
+    """
+    query = update.callback_query
+    await query.answer()
+    
+    # Извлекаем ключ AI (например, 'activate_grimoire' -> 'grimoire')
+    prompt_key = query.data.split('_')[1]
+    
+    # Сохраняем текущий активный AI-ключ для обработки текстовых сообщений
+    context.user_data['active_groq_mode'] = prompt_key
+    
+    # Убираем инлайн-клавиатуру и переходим в режим ожидания текста
+    await query.edit_message_text(
+        f"✅ Режим **{prompt_key.capitalize()}** активирован!\n\n"
+        f"Напишите ваш первый запрос, и {prompt_key.capitalize()} приступит к работе.\n\n"
+        f"Чтобы сменить режим, нажмите /start.", 
+        parse_mode='Markdown'
+    )
+    
+    # Устанавливаем новое состояние для обработки текстовых сообщений
+    context.user_data['state'] = STATE_AI_SELECTION_SELF 
+    return context.user_data['state']
+
+
+# --- Калькулятор Маркетплейсов (STATE_CALCULATOR) ---
+
+async def menu_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Запускает режим калькулятора."""
+    query = update.callback_query
+    await query.answer()
+
+    context.user_data['calc_data'] = {}
+    context.user_data['calc_step'] = 0
+    context.user_data['active_groq_mode'] = None
+    
+    await query.edit_message_text("🔢 **Калькулятор маркетплейсов**\n\nВведите закупочную цену товара в рублях:", parse_mode='Markdown')
+    context.user_data['state'] = STATE_CALCULATOR
+    return STATE_CALCULATOR
+
+async def handle_calculator_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обрабатывает шаги калькулятора."""
+    message_text = update.message.text
+    step = context.user_data.get('calc_step', 0)
+
+    try:
+        # Убедимся, что ввод - это число (float)
+        value = float(message_text.replace(',', '.').strip())
+        calc_data = context.user_data.get('calc_data', {})
+
+        if step == 0:
+            calc_data['purchase_price'] = value
+            context.user_data['calc_step'] = 1
+            await update.message.reply_text("Введите процент комиссии маркетплейса (например, 15):")
+        
+        elif step == 1:
+            calc_data['commission_percent'] = value
+            context.user_data['calc_step'] = 2
+            await update.message.reply_text("Введите желаемую цену продажи на маркетплейсе (в рублях):")
+            
+        elif step == 2:
+            calc_data['sale_price'] = value
+            context.user_data['calc_step'] = 3
+            await update.message.reply_text("Введите фиксированные расходы на логистику и хранение (в рублях):")
+            
+        elif step == 3:
+            calc_data['logistics_cost'] = value
+            context.user_data['calc_step'] = 4 # Финальный шаг
+            
+            # --- РАСЧЕТ ---
+            purchase_price = calc_data['purchase_price']
+            commission_percent = calc_data['commission_percent']
+            sale_price = calc_data['sale_price']
+            logistics_cost = calc_data['logistics_cost']
+            
+            # Расчет комиссии
+            commission_cost = sale_price * (commission_percent / 100)
+            
+            # Расчет прибыли
+            net_profit = sale_price - purchase_price - commission_cost - logistics_cost
+            
+            # Расчет рентабельности
+            if purchase_price > 0:
+                # ROI = (Чистая прибыль / Закупочная цена) * 100
+                roi = (net_profit / purchase_price) * 100
+            else:
+                roi = 0
+
+            # --- ВЫВОД РЕЗУЛЬТАТОВ ---
+            
+            result_text = (
+                "✅ **Результаты расчёта:**\n\n"
+                f"💰 Цена продажи: *{sale_price:.2f} ₽*\n"
+                f"🛒 Закупочная цена: *{purchase_price:.2f} ₽*\n"
+                f"📉 Комиссия ({commission_percent}%): *{commission_cost:.2f} ₽*\n"
+                f"🚚 Логистика/Хранение: *{logistics_cost:.2f} ₽*\n"
+                "---------------------------------\n"
+                f"**🟢 Чистая прибыль:** **{net_profit:.2f} ₽**\n"
+                f"**📈 Рентабельность (ROI):** **{roi:.2f}%**\n\n"
+            )
+            
+            if roi < 15:
+                result_text += "⚠️ **Внимание:** Рентабельность ниже рекомендуемой. Рассмотрите повышение цены продажи или снижение закупочной/логистической стоимости."
+            elif roi >= 15 and roi < 30:
+                result_text += "👍 **Отлично:** Хорошая рентабельность, проект выглядит перспективным."
+            else:
+                result_text += "🚀 **Супер:** Высокая рентабельность, отличный потенциал!"
+                
+            keyboard = [[InlineKeyboardButton("🔙 Назад в меню 'Для дела'", callback_data='menu_business')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await update.message.reply_text(result_text, reply_markup=reply_markup, parse_mode='Markdown')
+            context.user_data['state'] = STATE_BUSINESS_MENU # Возвращаемся в меню бизнеса
+            context.user_data['calc_step'] = 0 # Сброс
+            return STATE_BUSINESS_MENU
+
+    except ValueError:
+        await update.message.reply_text("❌ Ошибка ввода. Пожалуйста, введите число (можно с точкой или запятой).")
+        # Остаемся на текущем шаге
+        return STATE_CALCULATOR
+
+    except Exception as e:
+        logger.error(f"Ошибка калькулятора: {e}")
+        await update.message.reply_text("Произошла неожиданная ошибка в калькуляторе. Начните заново командой /start.")
+        context.user_data['state'] = STATE_MAIN_MENU
+        return STATE_MAIN_MENU
+
+# --- Обработка всех остальных текстовых сообщений ---
+
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Единый хендлер для всех текстовых сообщений. 
+    Перенаправляет сообщения либо в калькулятор, либо в Groq, либо выводит ошибку.
+    """
+    current_state = context.user_data.get('state', STATE_MAIN_MENU)
+    
+    if current_state == STATE_CALCULATOR:
+        # Если в режиме калькулятора, обрабатываем ввод калькулятором
+        return await handle_calculator_input(update, context)
+        
+    elif context.user_data.get('active_groq_mode'):
+        # Если в режиме активного AI (после нажатия "Активировать"), отправляем в Groq
+        active_mode = context.user_data['active_groq_mode']
+        return await handle_groq_request(update, context, active_mode)
+    
+    elif current_state in (STATE_AI_SELECTION_SELF, STATE_AI_SELECTION_BUSINESS):
+        # Пользователь отправил текст, но не активировал ни один AI
+        await update.message.reply_text("❓ Вы отправили текст, но не активировали ни один из ИИ-инструментов. Нажмите на кнопку 'Активировать' под нужным инструментом, чтобы начать диалог, или /start для возврата в главное меню.")
+        return current_state
+    
+    else:
+        # Непредвиденное текстовое сообщение (например, в главном меню)
+        await update.message.reply_text("🤔 Не понимаю. Выберите действие из меню или используйте /start, чтобы начать заново.")
+        return current_state
+
+# ==============================================================================
+# 4. НАСТРОЙКА И ЗАПУСК БОТА (WEBHOOK/POLLING)
+# ==============================================================================
+
+if not TELEGRAM_TOKEN:
+    logger.error("❌ TELEGRAM_TOKEN не установлен. Запуск невозможен.")
+    # Используем заглушку, чтобы код скомпилировался, но приложение не запустится
+    application = None
+else:
+    # Создаем объект приложения Telegram, но не запускаем его сразу
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    # Подключение хендлеров
+    application.add_handler(CommandHandler("start", start))
+
+    # CallbackQueryHandler для всех inline-кнопок
+    application.add_handler(CallbackQueryHandler(show_main_menu, pattern='^main_menu$'))
+    application.add_handler(CallbackQueryHandler(menu_self, pattern='^menu_self$'))
+    application.add_handler(CallbackQueryHandler(menu_business, pattern='^menu_business$'))
+    application.add_handler(CallbackQueryHandler(menu_calculator, pattern='^menu_calculator$'))
+
+    # Динамическая обработка выбора AI (ai_<key>_self/business)
+    application.add_handler(CallbackQueryHandler(ai_selection_handler, pattern='^ai_.*_self$|^ai_.*_business$'))
+
+    # Динамическая обработка демо-сценариев
+    application.add_handler(CallbackQueryHandler(show_demo_scenario, pattern='^demo_.*$'))
+
+    # Динамическая обработка активации доступа (activate_<key>)
+    application.add_handler(CallbackQueryHandler(activate_access, pattern='^activate_.*$'))
+
+    # Хендлер для всех текстовых сообщений (для калькулятора и Groq)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
+
+    # Глобальный объект, который будет использоваться gunicorn для запуска
+    # Это точка входа для Webhook (Procfile: main:app)
+    app = application.updater.bot
+
+
+def main():
+    """
+    Основная функция для запуска бота.
+    Автоматически переключается между Polling (для локального запуска) и 
+    Webhook (для деплоя на Render).
+    """
+    if not TELEGRAM_TOKEN or not application:
+        return
+
+    # Проверяем, есть ли переменная WEBHOOK_URL. Если есть, используем Webhook.
+    if WEBHOOK_URL:
+        # --- WEBHOOK (для Render) ---
+        # Запуск асинхронной задачи в отдельном потоке для установки Webhook
+        async def set_webhook_async():
+            # Это синхронная часть, которую нужно выполнять в потоке.
+            await application.bot.set_webhook(url=WEBHOOK_URL)
+            logger.info(f"✅ Webhook установлен: {WEBHOOK_URL}")
+
+        # Запускаем установку Webhook в цикле событий, но не блокируем основной поток gunicorn
+        asyncio.run(set_webhook_async())
+        
+        # Запуск сервера gunicorn будет обрабатывать входящие POST-запросы от Telegram
+        # (Это происходит автоматически через Procfile: web: gunicorn...)
+        logger.info("🚀 Бот запущен в режиме Webhook (Render/Gunicorn)")
+        
+    else:
+        # --- POLLING (для локального тестирования) ---
+        logger.info("📡 Бот запущен в режиме Polling (Локально)")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    # Если мы запускаем скрипт напрямую (локально), вызываем main
+    if not os.environ.get('PORT'):
+        main()
