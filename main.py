@@ -87,10 +87,10 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             {"role": "user", "content": user_query}
         ]
 
-        # Используем стабильную модель Mixtral 8x7B
+        # ИСПРАВЛЕНИЕ: Используем актуальное имя модели Mixtral
         chat_completion = groq_client.chat.completions.create(
             messages=messages,
-            model="mixtral-8x7b-32768" 
+            model="mixtral-8x7b-instruct-v0.1" 
         )
 
         ai_response = chat_completion.choices[0].message.content
