@@ -3,11 +3,11 @@ import logging
 import asyncio
 from typing import Dict, Any
 
-# НОВЫЕ ИМПОРТЫ для AIOHTTP, HTTPX, и Reply Keyboard
+# Импорты для AIOHTTP, HTTPX, и Reply Keyboard
 import httpx 
 from aiohttp import web
 
-# Импорты для Reply Keyboard
+# Импорты для Reply Keyboard и Telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from groq import Groq
@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 # Получение переменных окружения (ТОКЕНЫ)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN") 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-# Render предоставляет порт через переменную PORT, используем ее.
 PORT = int(os.environ.get("PORT", 8080))
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL") # URL вашего деплоя на Render
 
@@ -40,7 +39,7 @@ else:
     logger.warning("GROQ_API_KEY не установлен. Функции AI будут недоступны.")
 
 # ==============================================================================
-# 1. МЕСТО ДЛЯ ВАШИХ ТЕКСТОВ И ПРОМТОВ (ЗАПОЛНЕНЫ ДЛЯ DEMO)
+# 1. МЕСТО ДЛЯ ВАШИХ ТЕКСТОВ И ПРОМТОВ
 # ==============================================================================
 
 # СЕКЦИЯ 1: ВСТАВЬТЕ СЮДА ВАШИ СИСТЕМНЫЕ ПРОМТЫ
@@ -76,7 +75,6 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not groq_client or not update.message:
         return
 
-    # !!! ВРЕМЕННАЯ ПРОВЕРКА ОТКЛЮЧЕНА, Т.К. ПРОМТЫ ЗАПОЛНЕНЫ !!!
     user_query = update.message.text
     system_prompt = SYSTEM_PROMPTS.get(prompt_key, "Вы — полезный ассистент.")
 
@@ -88,10 +86,10 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             {"role": "user", "content": user_query}
         ]
 
-        # Используем модель Llama 3 8B, быструю и эффективную
+        # ИСПРАВЛЕНИЕ: Замена устаревшей модели на актуальную (llama-3.1-8b-8192)
         chat_completion = groq_client.chat.completions.create(
             messages=messages,
-            model="llama3-8b-8192"
+            model="llama-3.1-8b-8192" 
         )
 
         ai_response = chat_completion.choices[0].message.content
@@ -103,6 +101,7 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     except Exception as e:
         logger.error(f"Ошибка при работе с Groq API: {e}")
+        # Выводим сообщение об ошибке для пользователя
         await update.message.chat.send_message(
             "Произошла ошибка при обращении к AI. Проверьте ваш API ключ Groq или попробуйте позже.",
             parse_mode=ParseMode.MARKDOWN
@@ -425,6 +424,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         active_mode = context.user_data['active_groq_mode']
         # Проверяем, что AI режим активирован
         if active_mode in SYSTEM_PROMPTS:
+            # Вызываем функцию Groq
             return await handle_groq_request(update, context, active_mode)
         else:
             await update.message.reply_text("❓ Неизвестный AI режим. Нажмите /start для сброса.")
