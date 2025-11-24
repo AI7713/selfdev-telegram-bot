@@ -460,6 +460,7 @@ async def telegram_webhook_handler(request: web.Request) -> web.Response:
 
     # Передаем обновление в python-telegram-bot
     update = Update.de_json(data, application.bot)
+    # Используем process_update для обработки без конфликтов циклов
     await application.process_update(update)
 
     # Telegram ожидает HTTP 200 OK как подтверждение получения
@@ -489,11 +490,13 @@ async def init_webhook_and_start_server(application: Application):
 
 
     # 2. Запуск AIOHTTP сервера
-    # Мы используем AIOHTTP для прослушивания порта, минуя внутреннюю логику PTB.
-    app_runner = web.AppRunner(web.Application().add_routes([
+    # ИСПРАВЛЕННАЯ ЛОГИКА МАРШРУТИЗАЦИИ:
+    app = web.Application()
+    app.add_routes([
         web.post(webhook_path, telegram_webhook_handler),
-    ]))
+    ])
     
+    app_runner = web.AppRunner(app)
     await app_runner.setup()
     site = web.TCPSite(app_runner, '0.0.0.0', PORT)
     
@@ -517,4 +520,3 @@ if __name__ == '__main__':
             logger.info("Бот остановлен вручную.")
         except Exception as e:
             logger.error(f"Критическая ошибка при запуске бота: {e}")
-       
