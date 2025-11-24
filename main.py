@@ -87,10 +87,11 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             {"role": "user", "content": user_query}
         ]
 
-        # ИСПРАВЛЕНИЕ: Используем актуальное имя модели Mixtral
+        # ИСПРАВЛЕНИЕ: Переключаемся на стабильную модель Llama 3 8B, 
+        # чтобы избежать проблем с обновлением имен Mixtral.
         chat_completion = groq_client.chat.completions.create(
             messages=messages,
-            model="mixtral-8x7b-instruct-v0.1" 
+            model="llama3-8b-8192" 
         )
 
         ai_response = chat_completion.choices[0].message.content
@@ -115,7 +116,8 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             user_message = "❌ **Ошибка 401: Неверный API ключ Groq.** Убедитесь, что ваш ключ установлен правильно в Render."
         # Другие HTTP-ошибки
         else:
-            user_message = f"❌ **Ошибка Groq API:** Проблема с сервисом или лимитами. Код ошибки: {e.status_code}."
+            # Общее сообщение для других ошибок, включая 404/403
+            user_message = f"❌ **Ошибка Groq API:** Проблема с сервисом или лимитами. Код ошибки: {e.status_code}. Проверьте имя модели, если оно было изменено!"
             
         await update.message.chat.send_message(
             user_message,
