@@ -243,7 +243,12 @@ async def show_demo_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     # Ключ демо-сценария совпадает с ключом промта (например, 'demo_grimoire' -> 'grimoire')
     demo_key = query.data.split('_')[1] 
-    text_content = DEMO_SCENARIOS.get(demo_key, "⚠️ Описание демо-сценария не найдено. Проверьте ваш словарь DEMO_SCENARIOS.")
+    
+    # Проверка, что демо-сценарий заполнен, иначе выводим ошибку
+    if "ВСТАВЬТЕ_СЮДА_ДЛИННОЕ_ОПИСАНИЕ" in DEMO_SCENARIOS.get(demo_key, ""):
+         text_content = "⚠️ **Описание демо-сценария не заполнено!** Пожалуйста, обновите словарь `DEMO_SCENARIOS` в файле `main.py`."
+    else:
+        text_content = DEMO_SCENARIOS.get(demo_key, "⚠️ Описание демо-сценария не найдено. Проверьте ваш словарь DEMO_SCENARIOS.")
     
     # Определяем, к какому меню вернуться (постфикс не нужен, так как DEMO_SCENARIOS ключи не содержат _self/_business)
     # Определяем меню по предыдущему состоянию
@@ -444,16 +449,15 @@ async def run_webhook():
 
     # Если мы запускаемся на Render (есть PORT и WEBHOOK_URL), то запускаем Webhook
     if os.environ.get('PORT') and WEBHOOK_URL:
-        # Путь, по которому Telegram будет отправлять запросы (например, /selfdev-bot-webhook)
         webhook_path = "/"
         full_webhook_url = f"{WEBHOOK_URL}{webhook_path}"
         
-        # Установка Webhook для Telegram
+        # 1. Установка Webhook для Telegram
         await application.bot.set_webhook(url=full_webhook_url)
         logger.info(f"✅ Webhook установлен: {full_webhook_url}")
 
-        # Запуск встроенного Webhook-сервера python-telegram-bot
-        # Обратите внимание: listen='0.0.0.0' и port=PORT - это критично для Render
+        # 2. Запуск встроенного Webhook-сервера python-telegram-bot
+        # Это блокирующая асинхронная операция, которая запустит сервер.
         await application.run_webhook(
             listen="0.0.0.0",
             port=PORT,
@@ -467,21 +471,20 @@ async def run_webhook():
 
 
 if __name__ == '__main__':
-    # В этом блоке мы используем более чистый метод, чтобы избежать
-    # конфликта event loop, вызывая run_webhook напрямую, если TELEGRAM_TOKEN есть.
-    if TELEGRAM_TOKEN:
+    # САМЫЙ ЧИСТЫЙ СПОСОБ: Прямой запуск асинхронной задачи в цикле событий.
+    # Это полностью исключает конфликт с asyncio.run().
+    if TELEGRAM_TOKEN and os.environ.get('PORT'):
         try:
-            # Пытаемся запустить Webhook в стандартном цикле asyncio
-            asyncio.run(run_webhook())
-        except RuntimeError as e:
-            # Обработка случая, когда Render уже запустил loop (ошибка: RuntimeError: This event loop is already running)
-            if "This event loop is already running" in str(e):
-                logger.warning("Event loop уже запущен. Пробуем запустить run_webhook без asyncio.run()")
-                # Добавляем задачу в уже существующий цикл
-                asyncio.ensure_future(run_webhook())
-                # Запускаем цикл в режиме ожидания (run_forever), чтобы процесс не завершился
-                # Это необходимо для постоянной работы на Render
-                asyncio.get_event_loop().run_forever()
-            else:
-                # Если ошибка другая, выбрасываем ее
-                raise
+            # Получаем существующий или создаем новый цикл
+            loop = asyncio.get_event_loop()
+            
+            # Добавляем асинхронную функцию как задачу в цикл
+            # ВНИМАНИЕ: Запуск run_webhook() должен быть создан как задача,
+            # а не выполнен синхронно.
+            loop.create_task(run_webhook())
+            
+            # Запускаем цикл навсегда, чтобы процесс не завершился (критично для Render)
+            loop.run_forever()
+            
+        except Exception as e:
+            logger.error(f"Критическая ошибка при запуске цикла: {e}")
