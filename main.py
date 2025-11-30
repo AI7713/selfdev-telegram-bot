@@ -874,10 +874,28 @@ async def show_progress_handler(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     
-    await show_usage_progress(update, context)
+    user_id = query.from_user.id
+    stats = await get_usage_stats(user_id)
+    
+    # Прогресс-бар инструментов
+    tools_progress = "▰" * min(stats['tools_used'], 5) + "▱" * (5 - min(stats['tools_used'], 5))
+    ai_progress = "▰" * min(stats['ai_requests'] // 3, 5) + "▱" * (5 - min(stats['ai_requests'] // 3, 5))
+    
+    progress_text = f"""
+📊 **ВАШ ПРОГРЕСС:**
+
+🛠️ Инструменты: {tools_progress} {stats['tools_used']}/5
+🤖 AI запросы: {ai_progress} {stats['ai_requests']}+
+📈 Калькулятор: {stats['calculator_uses']} использований
+🎯 Группа теста: {stats['ab_test_group']}
+
+💡 Исследуйте больше инструментов для увеличения прогресса!
+    """
+    
+    # Отправляем прогресс
+    await query.message.reply_text(progress_text, parse_mode=ParseMode.MARKDOWN)
     
     # Добавляем персональные рекомендации
-    user_id = query.from_user.id
     recommendation = await get_personal_recommendation(user_id)
     await query.message.reply_text(recommendation, parse_mode=ParseMode.MARKDOWN)
     
