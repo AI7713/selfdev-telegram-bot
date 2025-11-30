@@ -455,12 +455,23 @@ async def start_economy_calculator(update: Update, context: ContextTypes.DEFAULT
     context.user_data['calculator_step'] = 0
     context.user_data['calculator_data'] = {}
     
-    await update.message.reply_text(
-        "🛍️ **РАСЧЕТ ЭКОНОМИКИ МАРКЕТПЛЕЙСА**\n\n"
-        "Введите данные вашего товара:\n\n"
-        + CALCULATOR_STEPS[0],
-        parse_mode=ParseMode.MARKDOWN
-    )
+    # УНИВЕРСАЛЬНЫЙ ПОДХОД для любого типа update
+    if update.callback_query:
+        # Для callback query
+        await update.callback_query.message.reply_text(
+            "🛍️ **РАСЧЕТ ЭКОНОМИКИ МАРКЕТПЛЕЙСА**\n\n"
+            "Введите данные вашего товара:\n\n"
+            + CALCULATOR_STEPS[0],
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        # Для обычного сообщения
+        await update.message.reply_text(
+            "🛍️ **РАСЧЕТ ЭКОНОМИКИ МАРКЕТПЛЕЙСА**\n\n"
+            "Введите данные вашего товара:\n\n"
+            + CALCULATOR_STEPS[0],
+            parse_mode=ParseMode.MARKDOWN
+        )
 
 async def handle_economy_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработчик калькулятора с защитой от ошибок"""
