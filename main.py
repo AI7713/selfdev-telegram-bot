@@ -1290,8 +1290,12 @@ async def handle_skilltrainer_actions(update: Update, context: ContextTypes.DEFA
             "Просто отправьте её другу в Telegram!",
             parse_mode=ParseMode.MARKDOWN
         )
-    elif action == "st_new_session":
-        await start_skilltrainer_session(update, context)
+elif action == "st_new_session":
+    # 🔹 СБРОС СОСТОЯНИЯ — КЛЮЧЕВОЕ ИЗМЕНЕНИЕ
+    context.user_data['state'] = BotState.BUSINESS_MENU
+    context.user_data['active_groq_mode'] = None
+    await start_skilltrainer_session(update, context)
+    
 
 async def finish_skilltrainer_interview(update: Update, context: ContextTypes.DEFAULT_TYPE, session: SkillSession):
     session.state = SessionState.MODE_SELECTION
