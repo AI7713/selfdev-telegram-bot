@@ -17,7 +17,7 @@ from telegram.constants import ParseMode
 # ==============================================================================
 # 0. КОНФИГУРАЦИЯ И ВЕРСИОНИРОВАНИЕ
 # ==============================================================================
-BOT_VERSION = "v3.3.1"  # Исправленная версия с поддержкой текстовых сообщений в SKILLTRAINER
+BOT_VERSION = "v3.3.2"  # Исправлены циклы в SKILLTRAINER и сброс состояния
 
 logging.basicConfig(
     format=f"%(asctime)s - %(name)s - {BOT_VERSION} - %(levelname)s - %(message)s",
@@ -27,11 +27,11 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-PORT = int(os.environ.get("PORT", 8080))
+PORT = int(os.environ.get("PORT", 10000))  # Render по умолчанию использует 10000
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # ==============================================================================
-# 1. КЛАССЫ (без изменений — оставляем как есть)
+# 1. КЛАССЫ — БЕЗ ИЗМЕНЕНИЙ
 # ==============================================================================
 class LRUCache:
     def __init__(self, max_size: int = 1000):
@@ -149,7 +149,7 @@ ai_cache = AIResponseCache(max_size=100)
 active_skill_sessions: Dict[int, SkillSession] = {}
 
 # ==============================================================================
-# 3. КОНСТАНТЫ (без изменений)
+# 3. КОНСТАНТЫ — БЕЗ ИЗМЕНЕНИЙ
 # ==============================================================================
 CONFIG_VERSION = "v3.0"
 SKILLTRAINER_VERSION = "v1.0"
@@ -247,7 +247,7 @@ SKILLTRAINER_GATES = {
 }
 
 # ==============================================================================
-# 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ — БЕЗ ИЗМЕНЕНИЙ
 # ==============================================================================
 def sanitize_user_input(text: str, max_length: int = 2000) -> str:
     if not text:
@@ -354,118 +354,8 @@ def format_finish_packet(session: SkillSession, ai_response: str) -> str:
     return packet
 
 # ==============================================================================
-# 5. GROWTH, КАЛЬКУЛЯТОР, GROQ — без изменений (опущены для краткости)
+# 5. GROWTH, КАЛЬКУЛЯТОР, GROQ — БЕЗ ИЗМЕНЕНИЙ
 # ==============================================================================
-# (все функции из исходного файла остаются без изменений:
-# get_usage_stats, update_usage_stats, show_usage_progress, show_referral_program,
-# calculate_economy_metrics, send_long_message, handle_groq_request и т.д.)
-
-# ==============================================================================
-# 6. ИСПРАВЛЕННАЯ ФУНКЦИЯ: send_skilltrainer_question
-# ==============================================================================
-async def send_skilltrainer_question(update: Update, context: ContextTypes.DEFAULT_TYPE, session: SkillSession):
-    """Отправляет следующий вопрос SKILLTRAINER — поддерживает и текст, и кнопки"""
-    hud = generate_hud(session)
-    if session.current_step < len(SKILLTRAINER_QUESTIONS):
-        question = SKILLTRAINER_QUESTIONS[session.current_step]
-        if session.current_step == 6:
-            # Шаг выбора режима — всегда кнопки
-            keyboard = [
-                [
-                    InlineKeyboardButton("🎭 Sim", callback_data="st_mode_sim"),
-                    InlineKeyboardButton("💪 Drill", callback_data="st_mode_drill"),
-                    InlineKeyboardButton("🏗️ Build", callback_data="st_mode_build")
-                ],
-                [
-                    InlineKeyboardButton("📋 Case", callback_data="st_mode_case"),
-                    InlineKeyboardButton("❓ Quiz", callback_data="st_mode_quiz"),
-                    InlineKeyboardButton("ℹ️ Описания", callback_data="st_mode_info")
-                ],
-                [
-                    InlineKeyboardButton("🔙 Назад", callback_data="st_back"),
-                    InlineKeyboardButton("❌ Отмена", callback_data="st_cancel")
-                ]
-            ]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    f"{hud}\n{question}\n**Выберите режим тренировки:**",
-                    reply_markup=reply_markup,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            else:
-                await update.message.reply_text(
-                    f"{hud}\n{question}\n**Выберите режим тренировки:**",
-                    reply_markup=reply_markup,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-        else:
-            # Обычные вопросы
-            if update.callback_query:
-                await update.callback_query.edit_message_text(
-                    f"{hud}\n{question}",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            else:
-                await update.message.reply_text(
-                    f"{hud}\n{question}",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-    else:
-        await finish_skilltrainer_interview(update, context, session)
-
-# ==============================================================================
-# 7. ИСПРАВЛЕНА: handle_skilltrainer_response
-# ==============================================================================
-async def handle_skilltrainer_response(update: Update, context: ContextTypes.DEFAULT_TYPE, session: SkillSession):
-    user_text = update.message.text
-    user_id = update.message.from_user.id
-
-    if user_text.lower() in ['отмена', 'cancel', 'стоп', 'stop']:
-        if user_id in active_skill_sessions:
-            del active_skill_sessions[user_id]
-        await update.message.reply_text("❌ Сессия SKILLTRAINER отменена.")
-        await show_business_menu_from_callback(update, context)
-        return
-
-    if user_text.lower() in ['подсказка', 'hint', 'help']:
-        hint = generate_hint(session, user_text)
-        session.add_hint(hint)
-        await update.message.reply_text(hint)
-        return
-
-    session.add_answer(session.current_step - 1, user_text)
-    check_gate(session, "interview_complete")
-
-    # Исправлено: убрано session.settings.hints_enabled
-    import random
-    if random.random() < 0.3:
-        hint = generate_hint(session)
-        session.add_hint(hint)
-        await update.message.reply_text(hint)
-
-    if session.current_step < len(SKILLTRAINER_QUESTIONS):
-        await send_skilltrainer_question(update, context, session)
-    else:
-        session.state = SessionState.MODE_SELECTION
-        await send_skilltrainer_question(update, context, session)
-
-# ==============================================================================
-# 8. ОСТАЛЬНЫЕ ФУНКЦИИ SKILLTRAINER — без изменений (опущены для краткости)
-# ==============================================================================
-# (start_skilltrainer_session, handle_skilltrainer_mode, start_training_session,
-# handle_training_start, finish_skilltrainer_session, handle_skilltrainer_actions,
-# finish_skilltrainer_interview — остаются как в оригинале)
-
-# ==============================================================================
-# 9. ОСНОВНЫЕ ФУНКЦИИ БОТА — без изменений
-# ==============================================================================
-# (start, menu_command, handle_text_message и т.д. — без изменений)
-
-# ==============================================================================
-# 10. ФУНКЦИИ, КОТОРЫЕ НЕ БЫЛИ ПОЛНОСТЬЮ ПРОПИСАНЫ ВЫШЕ — ВОССТАНАВЛИВАЕМ ИХ ИЗ ИСХОДНИКА
-# ==============================================================================
-
 async def get_usage_stats(user_id: int) -> Dict[str, Any]:
     if user_id not in user_stats_cache:
         user_stats_cache.set(user_id, {
@@ -750,16 +640,85 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.error(f"Неизвестная ошибка: {e}")
         await update.message.chat.send_message("Произошла ошибка при обращении к AI.", parse_mode=ParseMode.MARKDOWN)
 
+# ==============================================================================
+# 6. ОСНОВНОЙ ХЕНДЛЕР ТЕКСТА — ИСПРАВЛЕН
+# ==============================================================================
 REPLY_KEYBOARD = ReplyKeyboardMarkup(
-    [[KeyboardButton("/start"), KeyboardButton("/menu"), KeyboardButton("/progress")]], 
+    [[KeyboardButton("🏠 Меню"), KeyboardButton("📊 Прогресс")]], 
     one_time_keyboard=False, 
     resize_keyboard=True
 )
 
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
+    user_text = update.message.text.strip()
+    user_id = update.message.from_user.id
+
+    # Обработка команд как текста
+    if user_text == "🏠 Меню":
+        return await start(update, context)
+    if user_text == "📊 Прогресс":
+        return await progress_command(update, context)
+
+    # SKILLTRAINER
+    if user_id in active_skill_sessions:
+        session = active_skill_sessions[user_id]
+        await handle_skilltrainer_response(update, context, session)
+        return context.user_data.get('state', BotState.MAIN_MENU)
+
+    # Рефералы и прогресс
+    if any(word in user_text.lower() for word in ['пригласи', 'друг', 'реферал', 'ссылка']):
+        await show_referral_program(update, context)
+        return BotState.MAIN_MENU
+    if any(word in user_text.lower() for word in ['прогресс', 'статистика', 'стата']):
+        await show_usage_progress(update, context)
+        return BotState.MAIN_MENU
+
+    # Калькулятор
+    current_state = context.user_data.get('state', BotState.MAIN_MENU)
+    if current_state == BotState.CALCULATOR:
+        return await handle_economy_calculator(update, context)
+
+    # AI-режимы
+    elif context.user_data.get('active_groq_mode'):
+        active_mode = context.user_data['active_groq_mode']
+        if active_mode in SYSTEM_PROMPTS:
+            return await handle_groq_request(update, context, active_mode)
+        else:
+            await update.message.reply_text("❓ Неизвестный AI режим. Нажмите 🏠 Меню для сброса.")
+            return BotState.MAIN_MENU
+
+    elif current_state in (BotState.AI_SELECTION, BotState.BUSINESS_MENU):
+        await update.message.reply_text("❓ Вы отправили текст, но не активировали ни один из ИИ-инструментов. Нажмите на кнопку 'Активировать' под нужным инструментом, чтобы начать диалог, или 🏠 Меню для возврата.")
+        return current_state
+
+    else:
+        help_text = f"""
+🤖 **Personal Growth AI** {BOT_VERSION}
+💡 **Доступные команды:**
+/start - Главное меню  
+/progress - Ваш прогресс и статистика
+🎯 **Быстрый старт:**
+• Напишите "пригласи друга" для реферальной программы
+• Используйте "мой прогресс" для статистики
+• Выберите инструмент из меню
+🚀 **Новый инструмент: SKILLTRAINER**
+Многошаговая сессия развития навыков с гейтами и прогресс-баром!
+"""
+        await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+        return current_state
+
+# ==============================================================================
+# 7. ОСНОВНЫЕ ФУНКЦИИ БОТА — С ИСПРАВЛЕНИЕМ /start
+# ==============================================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
     if not update.message: 
         return BotState.MAIN_MENU
     user_id = update.message.from_user.id
+
+    # 🔥 КРИТИЧЕСКИ ВАЖНО: Сброс SKILLTRAINER при /start
+    if user_id in active_skill_sessions:
+        del active_skill_sessions[user_id]
+
     stats = await get_usage_stats(user_id)
     if stats['ab_test_group'] == 'A':
         inline_keyboard = [
@@ -957,7 +916,7 @@ async def activate_access(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.edit_message_text(
         f"✅ Режим **{prompt_key.capitalize()}** активирован!\n"
         f"Напишите ваш первый запрос, и {prompt_key.capitalize()} приступит к работе.\n"
-        f"Чтобы сменить режим, используйте команду /menu.", 
+        f"Чтобы сменить режим, используйте команду /start.", 
         parse_mode=ParseMode.MARKDOWN
     )
     context.user_data['state'] = BotState.AI_SELECTION
@@ -992,6 +951,9 @@ async def menu_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await start_economy_calculator(update, context)
     return BotState.CALCULATOR
 
+# ==============================================================================
+# 8. SKILLTRAINER — ИСПРАВЛЕННАЯ ОБРАБОТКА ОТВЕТОВ
+# ==============================================================================
 async def start_skilltrainer_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
@@ -1002,6 +964,90 @@ async def start_skilltrainer_session(update: Update, context: ContextTypes.DEFAU
     context.user_data['active_groq_mode'] = None
     logger.info(f"Started SKILLTRAINER session for user {user_id}")
     await send_skilltrainer_question(update, context, session)
+
+async def send_skilltrainer_question(update: Update, context: ContextTypes.DEFAULT_TYPE, session: SkillSession):
+    """Универсальная отправка вопроса — и для callback, и для текста"""
+    hud = generate_hud(session)
+    if session.current_step < len(SKILLTRAINER_QUESTIONS):
+        question = SKILLTRAINER_QUESTIONS[session.current_step]
+        if session.current_step == 6:
+            keyboard = [
+                [InlineKeyboardButton("🎭 Sim", callback_data="st_mode_sim"),
+                 InlineKeyboardButton("💪 Drill", callback_data="st_mode_drill"),
+                 InlineKeyboardButton("🏗️ Build", callback_data="st_mode_build")],
+                [InlineKeyboardButton("📋 Case", callback_data="st_mode_case"),
+                 InlineKeyboardButton("❓ Quiz", callback_data="st_mode_quiz"),
+                 InlineKeyboardButton("ℹ️ Описания", callback_data="st_mode_info")],
+                [InlineKeyboardButton("🔙 Назад", callback_data="st_back"),
+                 InlineKeyboardButton("❌ Отмена", callback_data="st_cancel")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    f"{hud}\n{question}\n**Выберите режим тренировки:**",
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await update.message.reply_text(
+                    f"{hud}\n{question}\n**Выберите режим тренировки:**",
+                    reply_markup=reply_markup,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        else:
+            if update.callback_query:
+                await update.callback_query.edit_message_text(
+                    f"{hud}\n{question}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            else:
+                await update.message.reply_text(
+                    f"{hud}\n{question}",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+    else:
+        await finish_skilltrainer_interview(update, context, session)
+
+async def handle_skilltrainer_response(update: Update, context: ContextTypes.DEFAULT_TYPE, session: SkillSession):
+    user_text = update.message.text
+    user_id = update.message.from_user.id
+
+    if user_text.lower() in ['отмена', 'cancel', 'стоп', 'stop']:
+        if user_id in active_skill_sessions:
+            del active_skill_sessions[user_id]
+        await update.message.reply_text("❌ Сессия SKILLTRAINER отменена.")
+        await show_business_menu_from_callback(update, context)
+        return
+
+    if user_text.lower() in ['подсказка', 'hint', 'help']:
+        hint = generate_hint(session, user_text)
+        session.add_hint(hint)
+        await update.message.reply_text(hint)
+        return
+
+    # 🔥 ИСПРАВЛЕНО: сохраняем под текущим шагом, а не на один назад
+    session.add_answer(session.current_step, user_text)
+    check_gate(session, "interview_complete")
+
+    # Убрано несуществующее свойство .settings.hints_enabled
+    import random
+    if random.random() < 0.3:
+        hint = generate_hint(session)
+        session.add_hint(hint)
+        await update.message.reply_text(hint)
+
+    if session.current_step < len(SKILLTRAINER_QUESTIONS):
+        await send_skilltrainer_question(update, context, session)
+    else:
+        session.state = SessionState.MODE_SELECTION
+        await send_skilltrainer_question(update, context, session)
+
+# ==============================================================================
+# 9. ОСТАЛЬНЫЕ ФУНКЦИИ SKILLTRAINER — БЕЗ ИЗМЕНЕНИЙ
+# ==============================================================================
+# (handle_skilltrainer_mode, start_training_session, handle_training_start,
+# finish_skilltrainer_session, handle_skilltrainer_actions, finish_skilltrainer_interview)
+# — оставлены такими же, как в исходнике, так как они работают корректно
 
 async def handle_skilltrainer_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1047,7 +1093,7 @@ async def handle_skilltrainer_mode(update: Update, context: ContextTypes.DEFAULT
     session.selected_mode = mode_map.get(mode_data)
     session.current_step += 1
     session.update_progress()
-    gate_passed, gate_message = check_gate(session, "mode_selected")
+    check_gate(session, "mode_selected")
     await start_training_session(update, context, session)
 
 async def start_training_session(update: Update, context: ContextTypes.DEFAULT_TYPE, session: SkillSession):
@@ -1119,7 +1165,7 @@ async def handle_training_start(update: Update, context: ContextTypes.DEFAULT_TY
             training_task = chat_completion.choices[0].message.content
             session.data = {'training_task': training_task}
             session.training_complete = True
-            gate_passed, gate_message = check_gate(session, "training_complete")
+            check_gate(session, "training_complete")
             keyboard = [
                 [InlineKeyboardButton("✅ Задание выполнено", callback_data="st_task_done")],
                 [InlineKeyboardButton("💡 Нужна подсказка", callback_data="st_need_hint")],
@@ -1281,54 +1327,8 @@ async def finish_skilltrainer_interview(update: Update, context: ContextTypes.DE
     session.state = SessionState.MODE_SELECTION
     await send_skilltrainer_question(update, context, session)
 
-async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    user_text = update.message.text
-    user_id = update.message.from_user.id
-    if user_id in active_skill_sessions:
-        session = active_skill_sessions[user_id]
-        await handle_skilltrainer_response(update, context, session)
-        return context.user_data.get('state', BotState.MAIN_MENU)
-    if any(word in user_text.lower() for word in ['пригласи', 'друг', 'реферал', 'ссылка']):
-        await show_referral_program(update, context)
-        return BotState.MAIN_MENU
-    if any(word in user_text.lower() for word in ['прогресс', 'статистика', 'стата']):
-        await show_usage_progress(update, context)
-        return BotState.MAIN_MENU
-    current_state = context.user_data.get('state', BotState.MAIN_MENU)
-    if current_state == BotState.CALCULATOR:
-        return await handle_economy_calculator(update, context)
-    elif context.user_data.get('active_groq_mode'):
-        active_mode = context.user_data['active_groq_mode']
-        if active_mode in SYSTEM_PROMPTS:
-            return await handle_groq_request(update, context, active_mode)
-        else:
-            await update.message.reply_text("❓ Неизвестный AI режим. Нажмите /start для сброса.")
-            return BotState.MAIN_MENU
-    elif current_state in (BotState.AI_SELECTION, BotState.BUSINESS_MENU):
-        await update.message.reply_text("❓ Вы отправили текст, но не активировали ни один из ИИ-инструментов. Нажмите на кнопку 'Активировать' под нужным инструментом, чтобы начать диалог, или /start для возврата в главное меню.")
-        return current_state
-    else:
-        help_text = f"""
-🤖 **Personal Growth AI** {BOT_VERSION}
-💡 **Доступные команды:**
-/start - Главное меню
-/version - Информация о версии  
-/progress - Ваш прогресс и статистика
-/referral - Пригласить друзей
-/menu - Альтернативное меню
-🎯 **Быстрый старт:**
-• Напишите "пригласи друга" для реферальной программы
-• Используйте "мой прогресс" для статистики
-• Выберите инструмент из меню
-🚀 **Новый инструмент: SKILLTRAINER**
-Многошаговая сессия развития навыков с гейтами и прогресс-баром!
-Исследуйте разные инструменты для увеличения прогресса!
-"""
-        await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
-        return current_state
-
 # ==============================================================================
-# 11. ЗАПУСК (без изменений)
+# 10. ЗАПУСК — БЕЗ ИЗМЕНЕНИЙ
 # ==============================================================================
 if not TELEGRAM_TOKEN:
     logger.error("❌ TELEGRAM_TOKEN не установлен. Запуск невозможен.")
