@@ -18,9 +18,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from groq import Groq, APIError
 from telegram.constants import ParseMode
 
-# ============================================================================== 
+# =============================================================================
 # 0. КОНФИГУРАЦИЯ И ВЕРСИОНИРОВАНИЕ
-# ==============================================================================
+# =============================================================================
 # ВЕРСИЯ БОТА - ОБНОВЛЯТЬ ПРИ КАЖДОМ ИЗМЕНЕНИИ!
 BOT_VERSION = "v3.2.2"  # + SKILLTRAINER-Universal как пошаговый агент
 
@@ -48,9 +48,9 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 PORT = int(os.environ.get("PORT", 8080))
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# ==============================================================================
+# =============================================================================
 # 1. НОВЫЕ КЛАССЫ ДЛЯ БЕЗОПАСНОСТИ И ПРОИЗВОДИТЕЛЬНОСТИ
-# ==============================================================================
+# =============================================================================
 class LRUCache:
     """LRU кэш с ограничением размера для предотвращения утечек памяти"""
     def __init__(self, max_size: int = 1000):
@@ -120,9 +120,9 @@ class BotState(Enum):
     CALCULATOR = "calculator"
     SKILLTRAINER = "skilltrainer"  # <-- НОВОЕ СОСТОЯНИЕ
 
-# ==============================================================================
+# =============================================================================
 # 2. ИНИЦИАЛИЗАЦИЯ СЕРВИСОВ
-# ==============================================================================
+# =============================================================================
 # Инициализация Groq клиента
 groq_client: Optional[Groq] = None
 if GROQ_API_KEY:
@@ -139,9 +139,9 @@ user_stats_cache = LRUCache(max_size=500)
 rate_limiter = RateLimiter(max_requests=15, window_seconds=60)
 ai_cache = AIResponseCache(max_size=100)
 
-# ==============================================================================
+# =============================================================================
 # 3. КОНСТАНТЫ И ПРОМТЫ
-# ==============================================================================
+# =============================================================================
 # ВЕРСИЯ ПРОМТОВ И КОНФИГУРАЦИИ
 CONFIG_VERSION = "v2.2"  # Обновлена
 
@@ -213,9 +213,9 @@ SKILLTRAINER_QUESTIONS = [
     "5️⃣ Есть ли у вас ограничения? (например: не хочу ролевые игры, только текст)"
 ]
 
-# ==============================================================================
+# =============================================================================
 # 4. ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-# ==============================================================================
+# =============================================================================
 def sanitize_user_input(text: str, max_length: int = 2000) -> str:
     """Очищает пользовательский ввод от потенциально опасных символов"""
     if not text:
@@ -258,9 +258,9 @@ def get_calculator_data_safe(context, index: int, default: float = 0.0) -> float
     data = context.user_data.get('calculator_data', {})
     return data.get(index, default)
 
-# ==============================================================================
+# =============================================================================
 # 5. GROWTH ФИЧИ - НОВЫЕ ФУНКЦИИ
-# ==============================================================================
+# =============================================================================
 async def get_usage_stats(user_id: int) -> Dict[str, Any]:
     """Получает статистику использования для пользователя"""
     if user_id not in user_stats_cache:
@@ -333,9 +333,9 @@ async def get_personal_recommendation(user_id: int) -> str:
     else:
         return "🎯 **Начните с:** Быстрый старт в меню 'Для себя'"
 
-# ==============================================================================
+# =============================================================================
 # 6. ФУНКЦИИ КАЛЬКУЛЯТОРА ЭКОНОМИКИ
-# ==============================================================================
+# =============================================================================
 def calculate_economy_metrics(data):
     """Расчет всех финансовых метрик"""
     себестоимость = data[0]
@@ -437,9 +437,7 @@ async def start_economy_calculator(update: Update, context: ContextTypes.DEFAULT
     """Начало калькулятора экономики"""
     context.user_data['calculator_step'] = 0
     context.user_data['calculator_data'] = {}
-    # УНИВЕРСАЛЬНЫЙ ПОДХОД для любого типа update
     if update.callback_query:
-        # Для callback query
         await update.callback_query.message.reply_text(
             "🛍️ **РАСЧЕТ ЭКОНОМИКИ МАРКЕТПЛЕЙСА**\n\n"
             "Введите данные вашего товара:\n\n"
@@ -447,7 +445,6 @@ async def start_economy_calculator(update: Update, context: ContextTypes.DEFAULT
             parse_mode=ParseMode.MARKDOWN
         )
     else:
-        # Для обычного сообщения
         await update.message.reply_text(
             "🛍️ **РАСЧЕТ ЭКОНОМИКИ МАРКЕТПЛЕЙСА**\n\n"
             "Введите данные вашего товара:\n\n"
@@ -487,9 +484,9 @@ async def handle_economy_calculator(update: Update, context: ContextTypes.DEFAUL
     except ValueError:
         await update.message.reply_text("❌ Пожалуйста, введите число:")
 
-# ==============================================================================
+# =============================================================================
 # 7. SKILLTRAINER-UNIVERSAL – ПОШАГОВЫЙ АГЕНТ
-# ==============================================================================
+# =============================================================================
 async def _ask_skilltrainer_question(update: Update, context: ContextTypes.DEFAULT_TYPE, step: int):
     if step < len(SKILLTRAINER_QUESTIONS):
         await update.message.reply_text(SKILLTRAINER_QUESTIONS[step])
@@ -556,7 +553,6 @@ async def handle_skilltrainer_session(update: Update, context: ContextTypes.DEFA
     step = user_data.get('skilltrainer_step', 0)
     answers = user_data.get('skilltrainer_data', {})
 
-    # Сохраняем ответ
     answers[step] = sanitize_user_input(update.message.text)[:300]
     user_data['skilltrainer_data'] = answers
 
@@ -588,9 +584,9 @@ async def handle_skilltrainer_session(update: Update, context: ContextTypes.DEFA
         else:
             await update.message.reply_text("Пожалуйста, выберите режим из кнопок.")
 
-# ==============================================================================
+# =============================================================================
 # 8. ФУНКЦИИ ГЕНЕРАЦИИ ТЕКСТА ЧЕРЕЗ GROQ С РАЗБИВКОЙ ОТВЕТОВ
-# ==============================================================================
+# =============================================================================
 async def send_long_message(chat_id: int, text: str, context: ContextTypes.DEFAULT_TYPE,
                             prefix: str = "", parse_mode: str = ParseMode.MARKDOWN):
     """Разбивает длинные сообщения на части для Telegram"""
@@ -605,7 +601,6 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not groq_client or not update.message:
         return
     user_id = update.message.from_user.id
-    # Проверка rate limiting
     if not rate_limiter.is_allowed(user_id):
         await update.message.reply_text("🚫 Слишком много запросов. Подождите минуту.")
         return
@@ -613,7 +608,6 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
     system_prompt = SYSTEM_PROMPTS.get(prompt_key, "Вы — полезный ассистент.")
     await update.message.chat.send_message(f"⌛ **{prompt_key.capitalize()}** обрабатывает ваш запрос...", parse_mode=ParseMode.MARKDOWN)
     try:
-        # Проверка кэша
         cached_response = ai_cache.get_cached_response(prompt_key, user_query)
         if cached_response:
             await send_long_message(
@@ -621,7 +615,7 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 cached_response,
                 context,
                 prefix=f"🤖 Ответ {prompt_key.capitalize()} (из кэша):\n\n",
-                parse_mode=None  # Безопасно!
+                parse_mode=None
             )
             await update_usage_stats(user_id, 'ai')
             return
@@ -635,58 +629,48 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             max_tokens=4000
         )
         ai_response = chat_completion.choices[0].message.content
-        # Сохраняем в кэш
         ai_cache.cache_response(prompt_key, user_query, ai_response)
         await send_long_message(
             update.message.chat.id,
             ai_response,
             context,
             prefix=f"🤖 Ответ {prompt_key.capitalize()}:\n\n",
-            parse_mode=None  # Безопасно!
+            parse_mode=None
         )
         await update_usage_stats(user_id, 'ai')
     except APIError as e:
         logger.error(f"ОШИБКА GROQ API: {e}")
+        user_message = "❌ Ошибка Groq API. Подождите и повторите."
         if e.status_code == 429:
             user_message = "❌ **Превышен лимит запросов.** Подождите минуту."
-        elif e.status_code == 400:
-            user_message = "❌ **Ошибка 400: Неверный запрос или лимиты.**"
         elif e.status_code == 401:
             user_message = "❌ **Ошибка 401: Неверный API ключ.**"
-        else:
-            user_message = f"❌ **Ошибка Groq API:** Код {e.status_code}"
         await update.message.chat.send_message(user_message, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         logger.error(f"Неизвестная ошибка: {e}")
         await update.message.chat.send_message("Произошла ошибка при обращении к AI.", parse_mode=ParseMode.MARKDOWN)
 
-# ==============================================================================
+# =============================================================================
 # 9. ОСНОВНЫЕ ФУНКЦИИ БОТА
-# ==============================================================================
-# Создание постоянной клавиатуры
+# =============================================================================
 REPLY_KEYBOARD = ReplyKeyboardMarkup(
     [[KeyboardButton("/start"), KeyboardButton("/menu"), KeyboardButton("/progress")]],
     one_time_keyboard=False,
     resize_keyboard=True
 )
 
---- Общие Хендлеры и Меню ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Обрабатывает команду /start с A/B тестированием"""
     if not update.message:
         return BotState.MAIN_MENU
     user_id = update.message.from_user.id
     stats = await get_usage_stats(user_id)
-    # A/B ТЕСТИРОВАНИЕ ИНТЕРФЕЙСОВ
     if stats['ab_test_group'] == 'A':
-        # Группа A - стандартный интерфейс
         inline_keyboard = [
             [InlineKeyboardButton("Для себя (ИИ-инструменты)", callback_data='menu_self')],
             [InlineKeyboardButton("Для дела (Калькуляторы и ИИ-инструменты)", callback_data='menu_business')]
         ]
         welcome_text = "👋 Привет! Выберите инструмент:"
     else:
-        # Группа B - улучшенный интерфейс
         inline_keyboard = [
             [InlineKeyboardButton("🧠 Личный рост", callback_data='menu_self')],
             [InlineKeyboardButton("🚀 Бизнес и карьера", callback_data='menu_business')],
@@ -695,22 +679,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
         welcome_text = f"🎯 Добро пожаловать! Ваша группа: {stats['ab_test_group']}\nВыберите направление:"
     inline_markup = InlineKeyboardMarkup(inline_keyboard)
     await update.message.reply_text("👋 Привет! Используйте нижнюю панель для навигации.", reply_markup=REPLY_KEYBOARD)
-    # Показываем прогресс для активных пользователей
     if stats['tools_used'] > 0:
         await show_usage_progress(update, context)
     await update.message.reply_text(welcome_text, reply_markup=inline_markup)
     context.user_data['state'] = BotState.MAIN_MENU
     context.user_data['active_groq_mode'] = None
-    # Логируем запуск с версией
     logger.info(f"{BOT_VERSION} - User {user_id} started bot (Group: {stats['ab_test_group']})")
     return BotState.MAIN_MENU
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Обрабатывает команду /menu"""
     return await start(update, context)
 
 async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает текущую версию бота"""
     version_info = f"""
 🤖 Personal Growth AI {BOT_VERSION}
 📊 КОМПОНЕНТЫ:
@@ -733,19 +713,15 @@ async def version_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(version_info, parse_mode=ParseMode.MARKDOWN)
 
 async def progress_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает прогресс использования"""
     await show_usage_progress(update, context)
-    # Добавляем персональные рекомендации
     user_id = update.message.from_user.id
     recommendation = await get_personal_recommendation(user_id)
     await update.message.reply_text(recommendation, parse_mode=ParseMode.MARKDOWN)
 
 async def referral_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает реферальную программу"""
     await show_referral_program(update, context)
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Выводит главное меню"""
     query = update.callback_query
     if query:
         await query.answer()
@@ -768,9 +744,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data['active_groq_mode'] = None
     return BotState.MAIN_MENU
 
---- Меню "Для себя" ---
 async def menu_self(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Обрабатывает выбор 'Для себя'"""
     query = update.callback_query
     await query.answer()
     keyboard = [
@@ -787,9 +761,7 @@ async def menu_self(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotSt
     context.user_data['active_groq_mode'] = None
     return BotState.AI_SELECTION
 
---- Меню "Для дела" ---
 async def menu_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Обрабатывает выбор 'Для дела'"""
     query = update.callback_query
     await query.answer()
     keyboard = [
@@ -809,7 +781,6 @@ async def menu_business(update: Update, context: ContextTypes.DEFAULT_TYPE) -> B
     return BotState.BUSINESS_MENU
 
 async def show_business_menu_from_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показывает меню бизнес-инструментов"""
     keyboard = [
         [InlineKeyboardButton("📊 Калькулятор маркетплейсов", callback_data='menu_calculator')],
         [InlineKeyboardButton("🗣️ Переговорщик", callback_data='ai_negotiator_business'),
@@ -833,9 +804,7 @@ async def show_business_menu_from_callback(update: Update, context: ContextTypes
             parse_mode=ParseMode.MARKDOWN
         )
 
---- Обработка выбора AI ---
 def get_ai_keyboard(prompt_key: str, back_button: str) -> InlineKeyboardMarkup:
-    """Возвращает клавиатуру для выбранного AI"""
     keyboard = [
         [InlineKeyboardButton("💡 Демо-сценарий (что он умеет?)", callback_data=f'demo_{prompt_key}')],
         [InlineKeyboardButton("✅ Активировать платный доступ (10 кнопок)", callback_data=f'activate_{prompt_key}')],
@@ -845,16 +814,12 @@ def get_ai_keyboard(prompt_key: str, back_button: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(keyboard)
 
 async def ai_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Обрабатывает выбор конкретного AI"""
     query = update.callback_query
     await query.answer()
     callback_data = query.data
-    prompt_key = callback_data.split('_', 1)[1]  # <- исправлено для skilltrainer
+    prompt_key = callback_data.split('_', 1)[1]
     context.user_data['current_ai_key'] = prompt_key
-    if callback_data.endswith('_self'):
-        back_button = 'menu_self'
-    else:
-        back_button = 'menu_business'
+    back_button = 'menu_self' if callback_data.endswith('_self') else 'menu_business'
     reply_markup = get_ai_keyboard(prompt_key, back_button)
     await query.edit_message_text(
         f"Вы выбрали **{prompt_key.capitalize()}**.\n\n"
@@ -867,25 +832,20 @@ async def ai_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     return BotState.AI_SELECTION
 
 async def show_demo_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Выводит демо-сценарий для выбранного AI"""
     query = update.callback_query
     await query.answer()
-    demo_key = query.data.split('_', 1)[1]  # <- исправлено
+    demo_key = query.data.split('_', 1)[1]
     text_content = DEMO_SCENARIOS.get(demo_key, "⚠️ Описание демо-сценария не найдено.")
-    back_to_menu_key = 'menu_self' 
-    if context.user_data.get('state') == BotState.BUSINESS_MENU:
-        back_to_menu_key = 'menu_business'
+    back_to_menu_key = 'menu_self' if context.user_data.get('state') == BotState.AI_SELECTION else 'menu_business'
     keyboard = [[InlineKeyboardButton("🔙 Назад к выбору AI", callback_data=back_to_menu_key)]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await query.edit_message_text(text_content, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    context.user_data['state'] = BotState.AI_SELECTION if back_to_menu_key == 'menu_self' else BotState.BUSINESS_MENU
-    return context.user_data['state']
+    return context.user_data.get('state', BotState.MAIN_MENU)
 
 async def activate_access(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Активирует платный доступ"""
     query = update.callback_query
     await query.answer()
-    prompt_key = query.data.split('_', 1)[1]  # <- исправлено
+    prompt_key = query.data.split('_', 1)[1]
     context.user_data['active_groq_mode'] = prompt_key
     await query.edit_message_text(
         f"✅ Режим **{prompt_key.capitalize()}** активирован!\n\n"
@@ -897,12 +857,10 @@ async def activate_access(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return context.user_data['state']
 
 async def show_progress_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Обрабатывает показ прогресса из inline кнопки"""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     stats = await get_usage_stats(user_id)
-    # Прогресс-бар инструментов
     tools_progress = "▰" * min(stats['tools_used'], 5) + "▱" * (5 - min(stats['tools_used'], 5))
     ai_progress = "▰" * min(stats['ai_requests'] // 3, 5) + "▱" * (5 - min(stats['ai_requests'] // 3, 5))
     progress_text = f"""
@@ -913,16 +871,12 @@ async def show_progress_handler(update: Update, context: ContextTypes.DEFAULT_TY
 🎯 Группа теста: {stats['ab_test_group']}
 💡 Исследуйте больше инструментов для увеличения прогресса!
 """
-    # Отправляем прогресс
     await query.message.reply_text(progress_text, parse_mode=ParseMode.MARKDOWN)
-    # Добавляем персональные рекомендации
     recommendation = await get_personal_recommendation(user_id)
     await query.message.reply_text(recommendation, parse_mode=ParseMode.MARKDOWN)
     return context.user_data.get('state', BotState.MAIN_MENU)
 
---- Калькулятор Маркетплейсов (STATE_CALCULATOR) ---
 async def menu_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Запускает режим калькулятора"""
     query = update.callback_query
     await query.answer()
     context.user_data['state'] = BotState.CALCULATOR
@@ -930,18 +884,14 @@ async def menu_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await start_economy_calculator(update, context)
     return BotState.CALCULATOR
 
---- Обработка всех остальных текстовых сообщений ---
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
-    """Единый хендлер для всех текстовых сообщений с growth фичами"""
     user_text = update.message.text
     user_id = update.message.from_user.id
 
-    # ВИРАЛЬНЫЕ МЕХАНИКИ - обработка реферальных запросов
     if any(word in user_text.lower() for word in ['пригласи', 'друг', 'реферал', 'ссылка']):
         await show_referral_program(update, context)
         return BotState.MAIN_MENU
 
-    # Обработка прогресса
     if any(word in user_text.lower() for word in ['прогресс', 'статистика', 'стата']):
         await show_usage_progress(update, context)
         return BotState.MAIN_MENU
@@ -956,8 +906,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     elif context.user_data.get('active_groq_mode'):
         active_mode = context.user_data['active_groq_mode']
-
-        # Особый случай: SKILLTRAINER — запуск интервью
         if active_mode == 'skilltrainer':
             context.user_data['state'] = BotState.SKILLTRAINER
             context.user_data['skilltrainer_step'] = 0
@@ -970,8 +918,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
             await _ask_skilltrainer_question(update, context, 0)
             return BotState.SKILLTRAINER
-
-        # Обычные AI-инструменты
         elif active_mode in SYSTEM_PROMPTS:
             return await handle_groq_request(update, context, active_mode)
         else:
@@ -983,7 +929,6 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         return current_state
 
     else:
-        # Показываем помощь с growth фичами
         help_text = f"""
 🤖 Personal Growth AI {BOT_VERSION}
 💡 Доступные команды:
@@ -1001,17 +946,14 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
         return current_state
 
-# ==============================================================================
+# =============================================================================
 # 10. НАСТРОЙКА И ЗАПУСК БОТА (WEBHOOK/RENDER)
-# ==============================================================================
-
+# =============================================================================
 if not TELEGRAM_TOKEN:
     logger.error("❌ TELEGRAM_TOKEN не установлен. Запуск невозможен.")
     application = None
 else:
     application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    # Подключение хендлеров с growth фичами
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("menu", menu_command))
     application.add_handler(CommandHandler("version", version_command))
@@ -1027,9 +969,7 @@ else:
     application.add_handler(CallbackQueryHandler(show_progress_handler, pattern='^show_progress$'))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
---- AIOHTTP HANDLER ---
 async def telegram_webhook_handler(request: web.Request) -> web.Response:
-    """Обрабатывает входящие запросы от Telegram"""
     global application
     if application is None:
         return web.Response(status=500, text="Application not initialized.")
@@ -1042,7 +982,6 @@ async def telegram_webhook_handler(request: web.Request) -> web.Response:
     return web.Response(text="OK")
 
 async def init_webhook_and_start_server(application: Application):
-    """Устанавливает webhook и запускает AIOHTTP сервер"""
     if not os.environ.get('PORT') or not WEBHOOK_URL:
         logger.error("❌ Недостаточно переменных окружения (PORT или WEBHOOK_URL) для Webhook.")
         return
@@ -1066,7 +1005,7 @@ async def init_webhook_and_start_server(application: Application):
     logger.info(f"{BOT_VERSION} - 🚀 AIOHTTP Server запущен на порту {PORT}")
     await application.initialize()
     await site.start()
-    await asyncio.Future() 
+    await asyncio.Future()
 
 if __name__ == '__main__':
     if TELEGRAM_TOKEN and os.environ.get('PORT') and application:
