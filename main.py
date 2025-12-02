@@ -550,8 +550,8 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
                 update.message.chat.id,
                 cached_response,
                 context,
-                prefix=f"**🤖 Ответ {prompt_key.capitalize()} (из кэша):**\n\n",
-                parse_mode=ParseMode.MARKDOWN
+                prefix=f"🤖 Ответ {prompt_key.capitalize()} (из кэша):\n\n",
+                parse_mode=None
             )
             await update_usage_stats(user_id, 'ai')
             return
@@ -576,8 +576,8 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
             update.message.chat.id,
             ai_response,
             context,
-            prefix=f"**🤖 Ответ {prompt_key.capitalize()}:**\n\n",
-            parse_mode=ParseMode.MARKDOWN
+            prefix=f"🤖 Ответ {prompt_key.capitalize()}:\n\n",
+            parse_mode=None
         )
         
         await update_usage_stats(user_id, 'ai')
