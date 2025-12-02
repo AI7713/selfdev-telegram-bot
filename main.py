@@ -16,12 +16,11 @@ from telegram.constants import ParseMode
 # ==============================================================================
 # 0. КОНФИГУРАЦИЯ И ВЕРСИОНИРОВАНИЕ
 # ==============================================================================
-BOT_VERSION = "v3.3.6"  # Исправлены обе кнопки: «Пригласить друга» и «Новая сессия»
+BOT_VERSION = "v3.3.5"  # Только исправление "Пригласить друга"
 """
 ИСТОРИЯ ВЕРСИЙ:
 v3.3.0 - + SKILLTRAINER-Universal (полная реализация)
-v3.3.5 - Исправлена кнопка «Пригласить друга»
-v3.3.6 - Добавлен сброс состояния для «Новая сессия»
+v3.3.5 - Исправлена кнопка «Пригласить друга» в финальном меню SKILLTRAINER
 """
 logging.basicConfig(
     format=f"%(asctime)s - %(name)s - {BOT_VERSION} - %(levelname)s - %(message)s",
@@ -30,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-PORT = int(os.environ.get("PORT", 10000))  # Render default port
+PORT = int(os.environ.get("PORT", 10000))  # Render ожидает 10000
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 # ==============================================================================
 # 1. НОВЫЕ КЛАССЫ ДЛЯ БЕЗОПАСНОСТИ, ПРОИЗВОДИТЕЛЬНОСТИ И SKILLTRAINER
@@ -940,6 +939,7 @@ async def send_skilltrainer_question(update: Update, context: ContextTypes.DEFAU
                     InlineKeyboardButton("ℹ️ Описания", callback_data="st_mode_info")
                 ],
                 [
+                    InlineKeyboardButton("🔙 Назад", callback_data="st_back"),
                     InlineKeyboardButton("❌ Отмена", callback_data="st_cancel")
                 ]
             ]
@@ -980,7 +980,7 @@ async def handle_skilltrainer_response(update: Update, context: ContextTypes.DEF
     gate_passed, gate_message = check_gate(session, "interview_complete")
     # Добавляем случайную подсказку (30% chance)
     import random
-    if random.random() < 0.3 and session.settings.hints_enabled:
+    if random.random() < 0.3:
         hint = generate_hint(session)
         session.add_hint(hint)
         await update.message.reply_text(hint)
@@ -1009,6 +1009,15 @@ async def handle_skilltrainer_mode(update: Update, context: ContextTypes.DEFAULT
         keyboard = [[InlineKeyboardButton("🔙 Назад к выбору", callback_data="st_back_to_selection")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(descriptions_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+        return
+    if mode_data == 'back':
+        # Возврат на шаг назад
+        if session.current_step > 0:
+            session.current_step -= 1
+            if session.current_step in session.answers:
+                del session.answers[session.current_step]
+            session.update_progress()
+            await send_skilltrainer_question(update, context, session)
         return
     if mode_data == 'cancel':
         # Отмена сессии
@@ -1181,14 +1190,14 @@ async def finish_skilltrainer_session(update: Update, context: ContextTypes.DEFA
             # Удаляем сессию из активных
             if session.user_id in active_skill_sessions:
                 del active_skill_sessions[session.user_id]
-            # Предлагаем экспорт — ТОЛЬКО БЕЗ УДАЛЕННЫХ КНОПОК
+            # Предлагаем экспорт — НО БЕЗ КНОПОК "СКАЧАТЬ" И "ПОДЕЛИТЬСЯ"
             keyboard = [
                 [InlineKeyboardButton("🎁 Пригласить друга", callback_data="st_referral")],
                 [InlineKeyboardButton("🔄 Новая сессия", callback_data="st_new_session")],
                 [InlineKeyboardButton("🔙 В меню", callback_data="main_menu")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
-            # Отправляем Finish Packet **без markdown**
+            # Отправляем Finish Packet частями **без markdown**
             await send_long_message(
                 update.callback_query.message.chat.id,
                 session.finish_packet,
@@ -1255,7 +1264,7 @@ async def handle_skilltrainer_actions(update: Update, context: ContextTypes.DEFA
         # Завершение сессии
         await finish_skilltrainer_session(update, context, session)
     elif action == "st_referral":
-        # ✅ РАБОТАЕТ ВСЕГДА
+        # ✅ ТОЛЬКО ЭТО ИЗМЕНЕНО: отправка работает всегда
         bot_username = (await context.bot.get_me()).username
         ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
         await context.bot.send_message(
@@ -1264,9 +1273,7 @@ async def handle_skilltrainer_actions(update: Update, context: ContextTypes.DEFA
             parse_mode=ParseMode.MARKDOWN
         )
     elif action == "st_new_session":
-        # ✅ КРИТИЧЕСКИ ВАЖНО: сброс состояния
-        context.user_data['state'] = BotState.BUSINESS_MENU
-        context.user_data['active_groq_mode'] = None
+        # Новая сессия
         await start_skilltrainer_session(update, context)
 async def finish_skilltrainer_interview(update: Update, context: ContextTypes.DEFAULT_TYPE, session: SkillSession):
     """Завершает интервью и переходит к выбору режима"""
@@ -1279,7 +1286,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Единый хендлер для всех текстовых сообщений"""
     user_text = update.message.text
     user_id = update.message.from_user.id
-    # ⭐ Проверяем активную сессию SKILLTRAINER
+    # ⭐ ВАЖНОЕ ИЗМЕНЕНИЕ: Проверяем активную сессию SKILLTRAINER
     if user_id in active_skill_sessions:
         session = active_skill_sessions[user_id]
         await handle_skilltrainer_response(update, context, session)
