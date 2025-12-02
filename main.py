@@ -822,10 +822,10 @@ async def ai_selection_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     back_button = 'menu_self' if callback_data.endswith('_self') else 'menu_business'
     reply_markup = get_ai_keyboard(prompt_key, back_button)
     await query.edit_message_text(
-        f"Вы выбрали **{prompt_key.capitalize()}**.\n\n"
+        f"Вы выбрали {prompt_key.capitalize()}.\n\n"
         f"Чтобы начать, изучите демо-сценарий или активируйте доступ.", 
         reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=None
     )
     context.user_data['state'] = BotState.AI_SELECTION
     context.user_data['active_groq_mode'] = None
@@ -848,10 +848,10 @@ async def activate_access(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     prompt_key = query.data.split('_', 1)[1]
     context.user_data['active_groq_mode'] = prompt_key
     await query.edit_message_text(
-        f"✅ Режим **{prompt_key.capitalize()}** активирован!\n\n"
+        f"✅ Режим {prompt_key.capitalize()} активирован!\n\n"
         f"Напишите ваш первый запрос, и {prompt_key.capitalize()} приступит к работе.\n\n"
         f"Чтобы сменить режим, используйте команду /menu.", 
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=None
     )
     context.user_data['state'] = BotState.AI_SELECTION
     return context.user_data['state']
