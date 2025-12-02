@@ -17,7 +17,7 @@ from telegram.constants import ParseMode
 # ==============================================================================
 # 0. КОНФИГУРАЦИЯ И ВЕРСИОНИРОВАНИЕ
 # ==============================================================================
-BOT_VERSION = "v3.3.3"  # Исправлены все известные баги SKILLTRAINER
+BOT_VERSION = "v3.3.4"  # Финальная версия с UX-улучшениями
 
 logging.basicConfig(
     format=f"%(asctime)s - %(name)s - {BOT_VERSION} - %(levelname)s - %(message)s",
@@ -111,7 +111,7 @@ class SkillSession:
         self.answers: Dict[int, str] = {}
         self.selected_mode: Optional[TrainingMode] = None
         self.gates_passed: Set[str] = set()
-        self.last_hint: Optional[str] = None  # ✅ только последняя подсказка
+        self.last_hint: Optional[str] = None
         self.created_at: datetime = datetime.now()
         self.progress: float = 0.0
         self.finish_packet: Optional[str] = None
@@ -355,10 +355,8 @@ def format_finish_packet(session: SkillSession, ai_response: str) -> str:
     return packet
 
 # ==============================================================================
-# 5. GROWTH, КАЛЬКУЛЯТОР, GROQ — без изменений (опущено для краткости, но присутствует в полной версии)
+# 5. GROWTH, КАЛЬКУЛЯТОР, GROQ
 # ==============================================================================
-# (все функции из исходного файла остаются, но с parse_mode=None при отправке Finish Packet)
-
 async def get_usage_stats(user_id: int) -> Dict[str, Any]:
     if user_id not in user_stats_cache:
         user_stats_cache.set(user_id, {
@@ -644,7 +642,7 @@ async def handle_groq_request(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.chat.send_message("Произошла ошибка при обращении к AI.", parse_mode=ParseMode.MARKDOWN)
 
 # ==============================================================================
-# 6. ОСНОВНОЙ ХЕНДЛЕР С КНОПКОЙ «МЕНЮ»
+# 6. ОСНОВНОЙ ХЕНДЛЕР
 # ==============================================================================
 REPLY_KEYBOARD = ReplyKeyboardMarkup(
     [[KeyboardButton("🏠 Меню"), KeyboardButton("📊 Прогресс")]], 
@@ -735,7 +733,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
     logger.info(f"{BOT_VERSION} - User {user_id} started bot (Group: {stats['ab_test_group']})")
     return BotState.MAIN_MENU
 
-# ... остальные функции без изменений (menu_command, version_command и т.д.)
+# ... остальные функции без изменений ...
 
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
     return await start(update, context)
@@ -964,6 +962,7 @@ async def send_skilltrainer_question(update: Update, context: ContextTypes.DEFAU
     if session.current_step < len(SKILLTRAINER_QUESTIONS):
         question = SKILLTRAINER_QUESTIONS[session.current_step]
         if session.current_step == 6:
+            # 🔹 УБРАНА КНОПКА "НАЗАД"
             keyboard = [
                 [InlineKeyboardButton("🎭 Sim", callback_data="st_mode_sim"),
                  InlineKeyboardButton("💪 Drill", callback_data="st_mode_drill"),
@@ -971,8 +970,7 @@ async def send_skilltrainer_question(update: Update, context: ContextTypes.DEFAU
                 [InlineKeyboardButton("📋 Case", callback_data="st_mode_case"),
                  InlineKeyboardButton("❓ Quiz", callback_data="st_mode_quiz"),
                  InlineKeyboardButton("ℹ️ Описания", callback_data="st_mode_info")],
-                [InlineKeyboardButton("🔙 Назад", callback_data="st_back"),
-                 InlineKeyboardButton("❌ Отмена", callback_data="st_cancel")]
+                [InlineKeyboardButton("❌ Отмена", callback_data="st_cancel")]  # 🔹 только Отмена
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             if update.callback_query:
@@ -1018,7 +1016,7 @@ async def handle_skilltrainer_response(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(hint)
         return
 
-    session.add_answer(session.current_step, user_text)
+    session.add_answer(session.current_step, user_text)  # 🔹 исправлено: current_step, а не -1
     check_gate(session, "interview_complete")
 
     import random
@@ -1056,15 +1054,6 @@ async def handle_skilltrainer_mode(update: Update, context: ContextTypes.DEFAULT
         session.current_step = 6
         session.state = SessionState.MODE_SELECTION
         await send_skilltrainer_question(update, context, session)
-        return
-
-    if mode_data == 'back':
-        if session.current_step > 0:
-            session.current_step -= 1
-            if session.current_step in session.answers:
-                del session.answers[session.current_step]
-            session.update_progress()
-            await send_skilltrainer_question(update, context, session)
         return
 
     if mode_data == 'cancel':
@@ -1225,9 +1214,9 @@ async def finish_skilltrainer_session(update: Update, context: ContextTypes.DEFA
             await update_usage_stats(session.user_id, 'skilltrainer')
             if session.user_id in active_skill_sessions:
                 del active_skill_sessions[session.user_id]
+            # 🔹 ФИНАЛЬНОЕ МЕНЮ БЕЗ "ПОДЕЛИТЬСЯ" И "СКАЧАТЬ"
             keyboard = [
-                [InlineKeyboardButton("📥 Скачать текстовый файл", callback_data="st_export_txt")],
-                [InlineKeyboardButton("📊 Поделиться прогрессом", callback_data="st_share_progress")],
+                [InlineKeyboardButton("🎁 Пригласить друга", callback_data="st_referral")],
                 [InlineKeyboardButton("🔄 Новая сессия", callback_data="st_new_session")],
                 [InlineKeyboardButton("🔙 В меню", callback_data="main_menu")]
             ]
@@ -1237,11 +1226,11 @@ async def finish_skilltrainer_session(update: Update, context: ContextTypes.DEFA
                 session.finish_packet,
                 context,
                 prefix="",
-                parse_mode=None  # ✅ Без markdown!
+                parse_mode=None  # 🔹 без markdown
             )
             await update.callback_query.message.reply_text(
                 "✅ **СЕССИЯ SKILLTRAINER ЗАВЕРШЕНА!**\n"
-                "Вы можете скачать результаты или начать новую сессию.",
+                "Вы можете пригласить друга или начать новую сессию.",
                 reply_markup=reply_markup,
                 parse_mode=ParseMode.MARKDOWN
             )
@@ -1292,26 +1281,13 @@ async def handle_skilltrainer_actions(update: Update, context: ContextTypes.DEFA
         await finish_skilltrainer_session(update, context, session)
     elif action == "st_finish_session":
         await finish_skilltrainer_session(update, context, session)
-    elif action == "st_export_txt":
-        if session.finish_packet:
-            await send_long_message(
-                query.message.chat.id,
-                session.finish_packet,
-                context,
-                prefix="📄 **Экспорт SKILLTRAINER:**\n",
-                parse_mode=None  # ✅ Без markdown!
-            )
-            await query.message.reply_text("💡 **Совет:** Скопируйте этот текст и сохраните в файл.")
-        else:
-            await query.message.reply_text("❌ Нет данных для экспорта.")
-    elif action == "st_share_progress":
-        stats = await get_usage_stats(user_id)
+    elif action == "st_referral":  # 🔹 НОВАЯ КНОПКА
+        bot_username = (await context.bot.get_me()).username
+        ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
         await query.message.reply_text(
-            f"🎯 **Мой прогресс в SKILLTRAINER:**\n"
-            f"• Завершено сессий: {stats.get('skilltrainer_sessions', 0)}\n"
-            f"• Пройдено гейтов: {len(session.gates_passed)}/{len(SKILLTRAINER_GATES)}\n"
-            f"• Последняя подсказка: {session.last_hint if session.last_hint else 'не запрашивалась'}\n"
-            f"Продолжайте тренироваться! 💪",
+            f"🎁 **Пригласите друга — получите бонусы!**\n\n"
+            f"Ваша ссылка:\n`{ref_link}`\n\n"
+            "Просто отправьте её другу в Telegram!",
             parse_mode=ParseMode.MARKDOWN
         )
     elif action == "st_new_session":
