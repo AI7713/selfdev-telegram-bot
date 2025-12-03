@@ -17,7 +17,7 @@ from telegram.constants import ParseMode
 # ==============================================================================
 # 0. КОНФИГУРАЦИЯ И ВЕРСИОНИРОВАНИЕ
 # ==============================================================================
-BOT_VERSION = "v3.3.4"  # Финальная версия с UX-улучшениями
+BOT_VERSION = "v3.3.5"  # Финальная версия: UX + исправления кнопок
 
 logging.basicConfig(
     format=f"%(asctime)s - %(name)s - {BOT_VERSION} - %(levelname)s - %(message)s",
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-PORT = int(os.environ.get("PORT", 10000))  # Render default port
+PORT = int(os.environ.get("PORT", 10000))  # Render default
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 # ==============================================================================
@@ -355,7 +355,7 @@ def format_finish_packet(session: SkillSession, ai_response: str) -> str:
     return packet
 
 # ==============================================================================
-# 5. GROWTH, КАЛЬКУЛЯТОР, GROQ
+# 5. GROWTH, КАЛЬКУЛЯТОР, GROQ — стандартные функции (без изменений)
 # ==============================================================================
 async def get_usage_stats(user_id: int) -> Dict[str, Any]:
     if user_id not in user_stats_cache:
@@ -733,8 +733,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
     logger.info(f"{BOT_VERSION} - User {user_id} started bot (Group: {stats['ab_test_group']})")
     return BotState.MAIN_MENU
 
-# ... остальные функции без изменений ...
-
 async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
     return await start(update, context)
 
@@ -769,6 +767,8 @@ async def progress_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def referral_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await show_referral_program(update, context)
+
+# ... остальные функции (show_main_menu, menu_self, menu_business и т.д.) без изменений ...
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> BotState:
     query = update.callback_query
@@ -944,7 +944,7 @@ async def menu_calculator(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return BotState.CALCULATOR
 
 # ==============================================================================
-# 8. SKILLTRAINER — ОСНОВНЫЕ ФУНКЦИИ
+# 8. SKILLTRAINER — ИСПРАВЛЕННЫЙ ХЕНДЛЕР
 # ==============================================================================
 async def start_skilltrainer_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -970,7 +970,7 @@ async def send_skilltrainer_question(update: Update, context: ContextTypes.DEFAU
                 [InlineKeyboardButton("📋 Case", callback_data="st_mode_case"),
                  InlineKeyboardButton("❓ Quiz", callback_data="st_mode_quiz"),
                  InlineKeyboardButton("ℹ️ Описания", callback_data="st_mode_info")],
-                [InlineKeyboardButton("❌ Отмена", callback_data="st_cancel")]  # 🔹 только Отмена
+                [InlineKeyboardButton("❌ Отмена", callback_data="st_cancel")]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             if update.callback_query:
@@ -1016,7 +1016,7 @@ async def handle_skilltrainer_response(update: Update, context: ContextTypes.DEF
         await update.message.reply_text(hint)
         return
 
-    session.add_answer(session.current_step, user_text)  # 🔹 исправлено: current_step, а не -1
+    session.add_answer(session.current_step, user_text)
     check_gate(session, "interview_complete")
 
     import random
@@ -1214,7 +1214,7 @@ async def finish_skilltrainer_session(update: Update, context: ContextTypes.DEFA
             await update_usage_stats(session.user_id, 'skilltrainer')
             if session.user_id in active_skill_sessions:
                 del active_skill_sessions[session.user_id]
-            # 🔹 ФИНАЛЬНОЕ МЕНЮ БЕЗ "ПОДЕЛИТЬСЯ" И "СКАЧАТЬ"
+            # 🔹 ФИНАЛЬНОЕ МЕНЮ: ТОЛЬКО 3 КНОПКИ
             keyboard = [
                 [InlineKeyboardButton("🎁 Пригласить друга", callback_data="st_referral")],
                 [InlineKeyboardButton("🔄 Новая сессия", callback_data="st_new_session")],
@@ -1226,7 +1226,7 @@ async def finish_skilltrainer_session(update: Update, context: ContextTypes.DEFA
                 session.finish_packet,
                 context,
                 prefix="",
-                parse_mode=None  # 🔹 без markdown
+                parse_mode=None
             )
             await update.callback_query.message.reply_text(
                 "✅ **СЕССИЯ SKILLTRAINER ЗАВЕРШЕНА!**\n"
@@ -1249,15 +1249,38 @@ async def finish_skilltrainer_session(update: Update, context: ContextTypes.DEFA
             parse_mode=ParseMode.MARKDOWN
         )
 
+# ==============================================================================
+# 9. ГЛАВНЫЙ ХЕНДЛЕР ДЕЙСТВИЙ — С ИСПРАВЛЕНИЕМ
+# ==============================================================================
 async def handle_skilltrainer_actions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     action = query.data
+
+    # 🔹 ОБРАБОТКА БЕЗ СЕССИИ
+    if action == "st_referral":
+        bot_username = (await context.bot.get_me()).username
+        ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
+        await query.message.reply_text(
+            f"🎁 **Пригласите друга — получите бонусы!**\n\n"
+            f"Ваша ссылка:\n`{ref_link}`\n\n"
+            "Просто отправьте её другу в Telegram!",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    if action == "st_new_session":
+        await start_skilltrainer_session(update, context)
+        return
+
+    # 🔹 ОСТАЛЬНЫЕ ДЕЙСТВИЯ — ТОЛЬКО С АКТИВНОЙ СЕССИЕЙ
     if user_id not in active_skill_sessions:
         await query.edit_message_text("❌ Сессия не найдена.")
         return
+
     session = active_skill_sessions[user_id]
+
     if action == "st_task_done":
         await query.edit_message_text(
             f"{generate_hud(session)}\n"
@@ -1281,24 +1304,13 @@ async def handle_skilltrainer_actions(update: Update, context: ContextTypes.DEFA
         await finish_skilltrainer_session(update, context, session)
     elif action == "st_finish_session":
         await finish_skilltrainer_session(update, context, session)
-    elif action == "st_referral":  # 🔹 НОВАЯ КНОПКА
-        bot_username = (await context.bot.get_me()).username
-        ref_link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-        await query.message.reply_text(
-            f"🎁 **Пригласите друга — получите бонусы!**\n\n"
-            f"Ваша ссылка:\n`{ref_link}`\n\n"
-            "Просто отправьте её другу в Telegram!",
-            parse_mode=ParseMode.MARKDOWN
-        )
-    elif action == "st_new_session":
-        await start_skilltrainer_session(update, context)
 
 async def finish_skilltrainer_interview(update: Update, context: ContextTypes.DEFAULT_TYPE, session: SkillSession):
     session.state = SessionState.MODE_SELECTION
     await send_skilltrainer_question(update, context, session)
 
 # ==============================================================================
-# 9. ЗАПУСК НА RENDER
+# 10. ЗАПУСК
 # ==============================================================================
 if not TELEGRAM_TOKEN:
     logger.error("❌ TELEGRAM_TOKEN не установлен. Запуск невозможен.")
